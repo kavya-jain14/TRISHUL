@@ -9,6 +9,8 @@ import {
   ExitModeRequestSchema,
   ExitModeSnapshotSchema,
   ForecastEvidenceRequestSchema,
+  ForecastRunRequestSchema,
+  ForecastSnapshotSchema,
   IdempotencyKeySchema,
   MuleAssessmentSnapshotSchema,
   ProviderEventBatchSchema,
@@ -21,6 +23,7 @@ import {
   type EvidenceGateSnapshot,
   type ExposureSnapshot,
   type ExitModeSnapshot,
+  type ForecastSnapshot,
   type GraphSnapshot,
   type MuleAssessmentSnapshot,
   type ProviderEvent,
@@ -29,7 +32,13 @@ import {
 } from '@trishul/contracts';
 import { buildTraceGraph, calculateGraphExposure } from '@trishul/graph';
 import { assessMuleRisk, deriveMuleRiskFeatures } from '@trishul/intelligence';
-import { deriveExitModeFeatures, evaluateEvidenceGate, rankExitModes } from '@trishul/prediction';
+import {
+  deriveExitModeFeatures,
+  evaluateEvidenceGate,
+  rankExitModes,
+  rankGeoZones,
+  rankTimeHorizons,
+} from '@trishul/prediction';
 import { ConflictError, InvalidRequestError, NotFoundError } from '../../domain/errors.js';
 import type { CaseRecord, CaseRepository, IdempotencyRecord } from './case-repository.js';
 
@@ -95,6 +104,7 @@ export class CaseService {
       muleAssessments: [],
       exitModeSnapshots: [],
       evidenceGateSnapshots: [],
+      forecastSnapshots: [],
     };
     await this.repository.saveCase(record);
     const detail = this.toDetail(record);
@@ -739,6 +749,163 @@ export class CaseService {
     return snapshot;
   }
 
+  async runForecast(
+    caseId: string,
+    rawPayload: unknown,
+    rawIdempotencyKey: unknown,
+  ): Promise<ReplayResult<ForecastSnapshot>> {
+    const payload = ForecastRunRequestSchema.parse(rawPayload);
+    const idempotencyKey = IdempotencyKeySchema.parse(rawIdempotencyKey);
+    const record = await this.requireCase(caseId);
+    const gate = record.evidenceGateSnapshots.find(
+      (snapshot) =>
+        snapshot.graphVersion === record.summary.graphVersion &&
+        snapshot.accountId === payload.accountId,
+    );
+    if (!gate) {
+      throw new ConflictError(
+        'EVIDENCE_GATE_NOT_AVAILABLE',
+        'Run the Evidence Gate for the latest graph and account before ranking a forecast',
+      );
+    }
+    if (gate.geo.decision === 'PASS' && payload.geoCandidates.length === 0) {
+      throw new InvalidRequestError(
+        'GEO_CANDIDATES_REQUIRED',
+        'Geo evidence passed its gate, so at least one authorised candidate zone is required',
+      );
+    }
+    if (gate.geo.decision === 'ABSTAIN' && payload.geoCandidates.length > 0) {
+      throw new InvalidRequestError(
+        'GEO_FORECAST_WITHHELD',
+        'Geo candidates cannot be ranked when the geo Evidence Gate abstains',
+      );
+    }
+    if (gate.time.decision === 'PASS' && payload.timeHorizons.length !== 5) {
+      throw new InvalidRequestError(
+        'TIME_HORIZONS_REQUIRED',
+        'Time evidence passed its gate, so all five non-overlapping horizon buckets are required',
+      );
+    }
+    if (gate.time.decision === 'ABSTAIN' && payload.timeHorizons.length > 0) {
+      throw new InvalidRequestError(
+        'TIME_FORECAST_WITHHELD',
+        'Time horizons cannot be ranked when the time Evidence Gate abstains',
+      );
+    }
+
+    const operation = `case:${caseId}:forecast-ranking`;
+    const calculationInputHash = hashEvidence({
+      graphVersion: record.summary.graphVersion,
+      evidenceGateRunId: gate.evidenceGateRunId,
+      ...payload,
+    });
+    const replay = await this.readReplay<ForecastSnapshot>(
+      operation,
+      idempotencyKey,
+      calculationInputHash,
+    );
+    if (replay) return { value: ForecastSnapshotSchema.parse(replay), replayed: true };
+
+    const existing = record.forecastSnapshots.find(
+      (snapshot) => snapshot.graphVersion === record.summary.graphVersion,
+    );
+    if (existing) {
+      if (existing.calculationInputHash !== calculationInputHash) {
+        throw new ConflictError(
+          'FORECAST_VERSION_IMMUTABLE',
+          'Forecast inputs changed for an already-ranked graph version',
+        );
+      }
+      await this.storeReplay(operation, idempotencyKey, calculationInputHash, existing);
+      return { value: existing, replayed: false };
+    }
+
+    let geo: ForecastSnapshot['geo'];
+    let time: ForecastSnapshot['time'];
+    try {
+      geo =
+        gate.geo.decision === 'PASS'
+          ? rankGeoZones(payload.geoCandidates, gate.geo)
+          : {
+              decision: 'ABSTAIN',
+              reasonCodes: [...new Set([...gate.geo.reasonCodes, ...gate.geo.missingEvidence])],
+            };
+      time =
+        gate.time.decision === 'PASS'
+          ? rankTimeHorizons(payload.timeHorizons, gate.time)
+          : {
+              decision: 'ABSTAIN',
+              reasonCodes: [...new Set([...gate.time.reasonCodes, ...gate.time.missingEvidence])],
+            };
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw new InvalidRequestError('FORECAST_EVIDENCE_INVALID', error.message);
+      }
+      throw error;
+    }
+
+    const predictedConfidences = [
+      geo.decision === 'PREDICT' ? geo.confidence : null,
+      time.decision === 'PREDICT' ? time.confidence : null,
+    ].filter((value): value is number => value !== null);
+    const confidence =
+      predictedConfidences.length === 0
+        ? 0
+        : Number(
+            (
+              predictedConfidences.reduce((sum, value) => sum + value, 0) /
+              predictedConfidences.length
+            ).toFixed(3),
+          );
+    const generatedAt = this.clock();
+    const previousPredictionRunId = record.forecastSnapshots
+      .filter((snapshot) => snapshot.graphVersion < record.summary.graphVersion)
+      .sort((left, right) => right.graphVersion - left.graphVersion)[0]?.predictionRunId;
+    const snapshot = ForecastSnapshotSchema.parse({
+      predictionRunId: `forecast:${calculationInputHash.slice(0, 23)}`,
+      previousPredictionRunId: previousPredictionRunId ?? null,
+      evidenceGateRunId: gate.evidenceGateRunId,
+      caseId,
+      accountId: payload.accountId,
+      graphVersion: record.summary.graphVersion,
+      generatedAt,
+      exitMode: gate.exitMode,
+      evidenceGateDecision: gate.overallDecision,
+      geo,
+      time,
+      featureVersion: 'forecast-features-v1',
+      modelVersion: 'deterministic-forecast-v1',
+      ruleVersion: 'forecast-policy-v2',
+      calculationInputHash,
+      confidence,
+      reasonCodes: [
+        geo.decision === 'PREDICT' ? 'GEO_FORECAST_EMITTED' : 'GEO_FORECAST_WITHHELD',
+        time.decision === 'PREDICT' ? 'TIME_FORECAST_EMITTED' : 'TIME_FORECAST_WITHHELD',
+        previousPredictionRunId ? 'REFORECAST_AFTER_GRAPH_CHANGE' : 'INITIAL_FORECAST',
+      ],
+    });
+
+    record.forecastSnapshots.push(snapshot);
+    record.summary.updatedAt = generatedAt;
+    await this.repository.saveCase(record);
+    await this.storeReplay(operation, idempotencyKey, calculationInputHash, snapshot);
+    return { value: snapshot, replayed: false };
+  }
+
+  async getLatestForecast(caseId: string): Promise<ForecastSnapshot> {
+    const record = await this.requireCase(caseId);
+    const snapshot = record.forecastSnapshots.find(
+      (candidate) => candidate.graphVersion === record.summary.graphVersion,
+    );
+    if (!snapshot) {
+      throw new ConflictError(
+        'FORECAST_NOT_AVAILABLE',
+        'Rank zone/time outputs for the latest graph before requesting the forecast',
+      );
+    }
+    return snapshot;
+  }
+
   private addProviderEvent(record: CaseRecord, event: ProviderEvent): boolean {
     const eventHash = hashEvidence(event);
     const existingHash = record.providerEventHashes[event.eventId];
@@ -773,6 +940,7 @@ export class CaseService {
       riskAssessmentCount: record.muleAssessments.length,
       latestExitModeGraphVersion: record.exitModeSnapshots.at(-1)?.graphVersion ?? null,
       latestEvidenceGateGraphVersion: record.evidenceGateSnapshots.at(-1)?.graphVersion ?? null,
+      latestForecastGraphVersion: record.forecastSnapshots.at(-1)?.graphVersion ?? null,
     });
   }
 

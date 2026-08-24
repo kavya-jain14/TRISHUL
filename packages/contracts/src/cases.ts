@@ -48,6 +48,7 @@ export const CaseDetailSchema = z
     riskAssessmentCount: z.number().int().nonnegative().default(0),
     latestExitModeGraphVersion: z.number().int().positive().nullable().default(null),
     latestEvidenceGateGraphVersion: z.number().int().positive().nullable().default(null),
+    latestForecastGraphVersion: z.number().int().positive().nullable().default(null),
   })
   .strict();
 

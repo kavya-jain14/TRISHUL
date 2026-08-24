@@ -4,6 +4,7 @@ import {
   ExposureRecomputeRequestSchema,
   ExitModeRequestSchema,
   ForecastEvidenceRequestSchema,
+  ForecastRunRequestSchema,
   IdentifierSchema,
   ProviderEventBatchSchema,
   ResolveTransactionRequestSchema,
@@ -129,6 +130,20 @@ export function registerCaseRoutes(app: FastifyInstance, service: CaseService): 
     '/api/v1/cases/:caseId/forecast/latest',
     async (request) => ({
       evidenceGate: await service.getLatestForecastEvidence(caseId(request.params.caseId)),
+    }),
+  );
+
+  app.post<{ Params: { caseId: string } }>('/api/v1/cases/:caseId/predictions', async (request) => {
+    const id = caseId(request.params.caseId);
+    const payload = ForecastRunRequestSchema.parse(request.body);
+    const result = await service.runForecast(id, payload, idempotencyKey(request));
+    return { forecast: result.value, replayed: result.replayed };
+  });
+
+  app.get<{ Params: { caseId: string } }>(
+    '/api/v1/cases/:caseId/predictions/latest',
+    async (request) => ({
+      forecast: await service.getLatestForecast(caseId(request.params.caseId)),
     }),
   );
 }

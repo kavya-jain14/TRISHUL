@@ -4,6 +4,7 @@ import type {
   ExposureSnapshot,
   EvidenceGateSnapshot,
   ExitModeSnapshot,
+  ForecastSnapshot,
   GraphSnapshot,
   MuleAssessmentSnapshot,
   ProviderEvent,
@@ -21,6 +22,7 @@ export interface CaseRecord {
   muleAssessments: MuleAssessmentSnapshot[];
   exitModeSnapshots: ExitModeSnapshot[];
   evidenceGateSnapshots: EvidenceGateSnapshot[];
+  forecastSnapshots: ForecastSnapshot[];
 }
 
 export interface IdempotencyRecord {

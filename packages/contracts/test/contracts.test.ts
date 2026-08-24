@@ -77,23 +77,21 @@ describe('shared contracts', () => {
   it('accepts independent geo/time abstention as a valid forecast', () => {
     const result = ForecastSnapshotSchema.safeParse({
       predictionRunId: 'run-stationary-1',
+      previousPredictionRunId: null,
+      evidenceGateRunId: 'gate-stationary-1',
       caseId: 'case-golden-b',
+      accountId: 'acct-x',
       generatedAt: '2026-08-24T10:10:00.000Z',
       exitMode: 'STATIONARY',
-      evidenceGate: {
-        outcome: 'ABSTAIN',
-        coverageScore: 0.31,
-        reasonCodes: ['INSUFFICIENT_HISTORY'],
-        missingEvidence: ['CASHOUT_HISTORY', 'NETWORK_SUPPORT'],
-        ruleVersion: 'evidence-gate-v1',
-      },
+      evidenceGateDecision: 'ABSTAIN',
       geo: { decision: 'ABSTAIN', reasonCodes: ['INSUFFICIENT_GEO_SUPPORT'] },
       time: { decision: 'ABSTAIN', reasonCodes: ['INSUFFICIENT_TEMPORAL_SUPPORT'] },
       graphVersion: 1,
-      featureVersion: 'features-v1',
-      modelVersion: 'prototype-rules-v1',
-      ruleVersion: 'forecast-policy-v1',
-      confidence: 0.31,
+      featureVersion: 'forecast-features-v1',
+      modelVersion: 'deterministic-forecast-v1',
+      ruleVersion: 'forecast-policy-v2',
+      calculationInputHash: 'a'.repeat(64),
+      confidence: 0,
       reasonCodes: ['FUNDS_STATIONARY'],
     });
 
