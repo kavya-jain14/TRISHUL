@@ -33,6 +33,7 @@ describe('TRISHUL API foundation', () => {
     });
     expect(response.json()).toMatchObject({
       phase: 'PHASE_4_ZONE_TIME_REFORECAST',
+      trustAccessMode: 'OPTIONAL_DEVELOPMENT_ADAPTER',
     });
     expect(response.json().capabilities).toEqual(
       expect.arrayContaining([
@@ -45,6 +46,10 @@ describe('TRISHUL API foundation', () => {
         'PII_FREE_EVIDENCE_ANCHORING',
         'TAMPER_EVIDENT_VERIFICATION',
         'REPLACEABLE_BLOCKCHAIN_PROVIDER',
+        'ISSUER_SIGNED_CREDENTIALS',
+        'SUBJECT_BOUND_CHALLENGE_PROOF',
+        'CAPABILITY_AND_CASE_SCOPED_ACCESS',
+        'REPLAY_SAFE_NONCE_VERIFICATION',
       ]),
     );
   });

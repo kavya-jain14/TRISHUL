@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CredentialClaimsSchema,
   ForecastSnapshotSchema,
   ExitModeRequestSchema,
   GraphEdgeSchema,
@@ -96,6 +97,23 @@ describe('shared contracts', () => {
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it('rejects incoherent or duplicated signed credential claims', () => {
+    const claims = {
+      credentialId: 'credential:test-a',
+      issuerId: 'issuer:test-a',
+      subjectId: 'investigator:test-a',
+      role: 'INVESTIGATOR',
+      capabilities: ['CASE_READ', 'CASE_READ'],
+      allowedPurposes: ['FRAUD_INVESTIGATION'],
+      caseIds: ['case:test-a'],
+      subjectPublicKeyPem: `-----BEGIN PUBLIC KEY-----\n${'A'.repeat(80)}\n-----END PUBLIC KEY-----`,
+      issuedAt: '2026-08-24T12:00:00.000Z',
+      expiresAt: '2026-08-24T11:00:00.000Z',
+    };
+
+    expect(CredentialClaimsSchema.safeParse(claims).success).toBe(false);
   });
 
   it('requires coherent provider history and authorised prediction provenance', () => {
