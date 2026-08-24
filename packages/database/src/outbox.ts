@@ -130,7 +130,12 @@ export class PostgresOutboxRepository {
        )
        UPDATE outbox_jobs AS job
        SET status = 'PROCESSING', locked_by = $2, locked_at = $3, lease_expires_at = $4
-       FROM candidate WHERE job.job_id = candidate.job_id ${RETURNING_JOB}`,
+       FROM candidate WHERE job.job_id = candidate.job_id
+       RETURNING job.job_id AS "jobId", job.job_type AS "jobType", job.payload,
+         job.idempotency_key AS "idempotencyKey", job.status,
+         job.available_at AS "availableAt", job.created_at AS "createdAt",
+         job.locked_by AS "lockedBy", job.lease_expires_at AS "leaseExpiresAt",
+         job.max_attempts AS "maxAttempts"`,
       [type, workerId, now, leaseExpiresAt]
     );
     const row = result.rows[0];
