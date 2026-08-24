@@ -57,7 +57,7 @@ export class DurableWorkerRuntime {
       throw new Error('At least one durable worker handler is required.');
   }
 
-  async processOne(type: OutboxJobType): Promise<WorkerResult> {
+  async processOne(type: OutboxJobType, shutdownSignal?: AbortSignal): Promise<WorkerResult> {
     const claimed = await this.queue.claimNext(
       type,
       this.config.workerId,
@@ -70,6 +70,9 @@ export class DurableWorkerRuntime {
     if (!handler) throw new Error(`No handler registered for ${type}.`);
 
     const abortController = new AbortController();
+    const abortForShutdown = () => abortController.abort(shutdownSignal?.reason);
+    if (shutdownSignal?.aborted) abortForShutdown();
+    else shutdownSignal?.addEventListener('abort', abortForShutdown, { once: true });
     let heartbeatError: unknown;
     let heartbeatChain = Promise.resolve();
     const heartbeat = async () => {
@@ -105,6 +108,14 @@ export class DurableWorkerRuntime {
     } catch (error) {
       clearInterval(timer);
       await heartbeatChain;
+      if (shutdownSignal?.aborted) {
+        this.logger.log('warn', 'outbox_job_interrupted', {
+          jobId: claim.jobId,
+          jobType: claim.type,
+          workerId: this.config.workerId,
+        });
+        return 'LEASE_LOST';
+      }
       if (error instanceof LeaseLostError || heartbeatError) {
         this.logger.log('warn', 'outbox_job_lease_lost', {
           jobId: claim.jobId,
@@ -128,6 +139,8 @@ export class DurableWorkerRuntime {
         if (failure instanceof LeaseLostError) return 'LEASE_LOST';
         throw failure;
       }
+    } finally {
+      shutdownSignal?.removeEventListener('abort', abortForShutdown);
     }
   }
 
@@ -162,7 +175,7 @@ export class DurableWorkerRuntime {
         let processed = false;
         for (const type of this.jobTypes) {
           if (signal.aborted) break;
-          if ((await this.processOne(type)) !== 'IDLE') processed = true;
+          if ((await this.processOne(type, signal)) !== 'IDLE') processed = true;
         }
         if (!processed && !signal.aborted) await abortableDelay(this.config.pollIntervalMs, signal);
       }

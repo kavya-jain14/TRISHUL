@@ -25,7 +25,9 @@ describe('TrishulApiClient', () => {
 
   test('runs all three reforecast stages in canonical order', async () => {
     const request = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}', { status: 200 }));
-    const client = new TrishulApiClient('http://127.0.0.1:4000', undefined, request);
+    const client = new TrishulApiClient('http://127.0.0.1:4000', undefined, request, {
+      allowInsecureHttp: true,
+    });
     const job = {
       caseId: 'case-forecast-worker',
       exitMode: { idempotencyKey: 'exit-key', request: { accountId: 'acct-1' } },
@@ -48,7 +50,14 @@ describe('TrishulApiClient', () => {
   });
 
   test('rejects unsafe base protocols and reports API failures without response content', async () => {
-    expect(() => new TrishulApiClient('file:///tmp/trishul')).toThrow(/HTTP or HTTPS/);
+    expect(() => new TrishulApiClient('file:///tmp/trishul')).toThrow(/HTTPS/);
+    expect(() => new TrishulApiClient('http://api.example.test')).toThrow(/HTTPS/);
+    expect(
+      () =>
+        new TrishulApiClient('http://api.example.test', undefined, fetch, {
+          allowInsecureHttp: true,
+        }),
+    ).toThrow(/HTTPS/);
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValue(new Response('{"private":"do-not-log"}', { status: 503 }));
@@ -60,5 +69,32 @@ describe('TrishulApiClient', () => {
     await expect(
       client.trace({ caseId: 'case-failure', idempotencyKey: 'trace-failure' }),
     ).rejects.not.toThrow(/do-not-log/);
+  });
+
+  test('bounds hung requests and propagates a caller abort', async () => {
+    const request = vi.fn<typeof fetch>().mockImplementation(
+      async (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          const abort = () => reject(new DOMException('aborted', 'AbortError'));
+          if (signal?.aborted) abort();
+          else signal?.addEventListener('abort', abort, { once: true });
+        }),
+    );
+    const timedClient = new TrishulApiClient('https://api.example.test', undefined, request, {
+      timeoutMs: 5,
+    });
+    await expect(
+      timedClient.trace({ caseId: 'case-timeout', idempotencyKey: 'trace-timeout' }),
+    ).rejects.toThrow(/timed out after 5ms/);
+
+    const controller = new AbortController();
+    controller.abort('lease lost');
+    const abortClient = new TrishulApiClient('https://api.example.test', undefined, request, {
+      timeoutMs: 1_000,
+    });
+    await expect(
+      abortClient.trace({ caseId: 'case-abort', idempotencyKey: 'trace-abort' }, controller.signal),
+    ).rejects.toThrow(/was aborted/);
   });
 });

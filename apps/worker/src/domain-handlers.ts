@@ -15,33 +15,33 @@ export function createDomainHandlers(
   logger: StructuredLogger,
 ): Partial<Record<OutboxJobType, JobHandler>> {
   return {
-    TRACE_GRAPH_EXPANSION: async (payload) => {
+    TRACE_GRAPH_EXPANSION: async (payload, context) => {
       const job = TraceGraphExpansionJobSchema.parse(payload);
-      await operations.trace(job);
+      await operations.trace(job, context.signal);
       completed(logger, 'trace_graph_expansion_dispatched', job.caseId);
     },
-    EXPOSURE_RECOMPUTE: async (payload) => {
+    EXPOSURE_RECOMPUTE: async (payload, context) => {
       const job = ExposureRecomputationJobSchema.parse(payload);
-      await operations.recomputeExposure(job);
+      await operations.recomputeExposure(job, context.signal);
       completed(logger, 'exposure_recomputation_dispatched', job.caseId);
     },
-    RISK_REASSESSMENT: async (payload) => {
+    RISK_REASSESSMENT: async (payload, context) => {
       const job = RiskReassessmentJobSchema.parse(payload);
-      await operations.reassessRisk(job);
+      await operations.reassessRisk(job, context.signal);
       completed(logger, 'risk_reassessment_dispatched', job.request.caseId, {
         accountId: job.accountId,
       });
     },
-    FORECAST_REFRESH: async (payload) => {
+    FORECAST_REFRESH: async (payload, context) => {
       const job = ForecastRefreshJobSchema.parse(payload);
-      await operations.refreshForecast(job);
+      await operations.refreshForecast(job, context.signal);
       completed(logger, 'forecast_refresh_dispatched', job.caseId, {
         accountId: job.forecast.request.accountId,
       });
     },
-    EVIDENCE_ANCHOR: async (payload) => {
+    EVIDENCE_ANCHOR: async (payload, context) => {
       const job = EvidenceAnchorJobSchema.parse(payload);
-      await operations.anchorEvidence(job);
+      await operations.anchorEvidence(job, context.signal);
       completed(logger, 'evidence_anchor_dispatched', job.caseId, {
         evidenceRef: job.request.evidenceRef,
       });

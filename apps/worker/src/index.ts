@@ -26,6 +26,11 @@ const metricsIntervalMs = positiveInteger('WORKER_METRICS_MS', 30_000);
 const operations = new TrishulApiClient(
   process.env.TRISHUL_API_BASE_URL ?? 'http://127.0.0.1:4000',
   process.env.TRISHUL_INTERNAL_SERVICE_TOKEN,
+  fetch,
+  {
+    timeoutMs: positiveInteger('TRISHUL_API_TIMEOUT_MS', 10_000),
+    allowInsecureHttp: process.env.NODE_ENV !== 'production',
+  },
 );
 
 const handlers: Partial<Record<OutboxJobType, JobHandler>> = {

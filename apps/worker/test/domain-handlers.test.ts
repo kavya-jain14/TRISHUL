@@ -31,15 +31,16 @@ describe('domain worker handlers', () => {
       'RISK_REASSESSMENT',
       'TRACE_GRAPH_EXPANSION',
     ]);
+    const context = { signal: new AbortController().signal, heartbeat: async () => undefined };
     await handlers.TRACE_GRAPH_EXPANSION!(
       { caseId: 'case-worker-a', idempotencyKey: 'trace-worker-a' },
-      { signal: new AbortController().signal, heartbeat: async () => undefined },
+      context,
     );
 
-    expect(client.trace).toHaveBeenCalledWith({
-      caseId: 'case-worker-a',
-      idempotencyKey: 'trace-worker-a',
-    });
+    expect(client.trace).toHaveBeenCalledWith(
+      { caseId: 'case-worker-a', idempotencyKey: 'trace-worker-a' },
+      context.signal,
+    );
     expect(events).toContain('trace_graph_expansion_dispatched');
     await expect(
       handlers.TRACE_GRAPH_EXPANSION!(
@@ -67,12 +68,13 @@ describe('domain worker handlers', () => {
       },
     };
 
-    await handler(payload, {
+    const context = {
       signal: new AbortController().signal,
       heartbeat: async () => undefined,
-    });
+    };
+    await handler(payload, context);
 
-    expect(client.anchorEvidence).toHaveBeenCalledWith(payload);
+    expect(client.anchorEvidence).toHaveBeenCalledWith(payload, context.signal);
     expect(JSON.stringify(logged)).not.toContain('private-account-value');
     expect(logged).toEqual([
       {
