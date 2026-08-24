@@ -1,5 +1,6 @@
 import cors from '@fastify/cors';
 import { DevelopmentHashchainProvider } from '@trishul/audit';
+import { InMemoryCredentialRegistry, TrustAccessError, TrustAccessService } from '@trishul/trust';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { DomainError } from './domain/errors.js';
@@ -12,12 +13,16 @@ import { registerCaseRoutes } from './modules/cases/routes.js';
 import { InMemoryEvidenceAnchorRepository } from './modules/evidence-anchors/anchor-repository.js';
 import { EvidenceAnchorService } from './modules/evidence-anchors/anchor-service.js';
 import { registerEvidenceAnchorRoutes } from './modules/evidence-anchors/routes.js';
+import { registerTrustAccessGuard } from './modules/trust/guard.js';
+import { registerTrustRoutes } from './modules/trust/routes.js';
 
 export interface BuildAppOptions {
   logger?: boolean;
   caseService?: CaseService;
   evidenceAnchorService?: EvidenceAnchorService;
   caseActionService?: CaseActionService;
+  trustAccessService?: TrustAccessService;
+  enforceTrustAccess?: boolean;
   persistenceMode?: 'IN_MEMORY_DEVELOPMENT_ADAPTER' | 'POSTGRESQL';
 }
 
@@ -30,6 +35,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   const caseService = options.caseService ?? new CaseService(new InMemoryCaseRepository());
+  const trustAccessService =
+    options.trustAccessService ?? new TrustAccessService(new InMemoryCredentialRegistry());
+  if (options.enforceTrustAccess) registerTrustAccessGuard(app, trustAccessService);
   const evidenceAnchorService =
     options.evidenceAnchorService ??
     new EvidenceAnchorService(
@@ -39,12 +47,15 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     );
   const caseActionService =
     options.caseActionService ??
-    new CaseActionService(new InMemoryCaseActionRepository(), (caseId) =>
-      caseService.getCase(caseId),
+    new CaseActionService(
+      new InMemoryCaseActionRepository(),
+      (caseId) => caseService.getCase(caseId),
+      (anchorId) => evidenceAnchorService.get(anchorId),
     );
   registerCaseRoutes(app, caseService);
-  registerCaseActionRoutes(app, caseActionService);
+  registerCaseActionRoutes(app, caseActionService, trustAccessService);
   registerEvidenceAnchorRoutes(app, evidenceAnchorService);
+  registerTrustRoutes(app, trustAccessService);
 
   app.get('/api/v1/health', async () => ({
     status: 'ok',
@@ -57,6 +68,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     product: 'TRISHUL',
     phase: 'PHASE_4_ZONE_TIME_REFORECAST',
     persistenceMode: options.persistenceMode ?? 'IN_MEMORY_DEVELOPMENT_ADAPTER',
+    trustAccessMode: options.enforceTrustAccess ? 'ENFORCED' : 'OPTIONAL_DEVELOPMENT_ADAPTER',
     doctrine: {
       intentInference: false,
       complaintAsBlacklist: false,
@@ -83,6 +95,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       'PII_FREE_EVIDENCE_ANCHORING',
       'TAMPER_EVIDENT_VERIFICATION',
       'REPLACEABLE_BLOCKCHAIN_PROVIDER',
+      'ISSUER_SIGNED_CREDENTIALS',
+      'SUBJECT_BOUND_CHALLENGE_PROOF',
+      'CAPABILITY_AND_CASE_SCOPED_ACCESS',
+      'REPLAY_SAFE_NONCE_VERIFICATION',
     ],
   }));
 
@@ -92,6 +108,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         error: error.code,
         message: error.message,
         details: error.details,
+      });
+    }
+
+    if (error instanceof TrustAccessError) {
+      return reply.status(error.statusCode).send({
+        error: error.code,
+        message: error.message,
+        reasonCodes: error.reasonCodes,
       });
     }
 

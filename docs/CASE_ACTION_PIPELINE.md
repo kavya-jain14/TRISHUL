@@ -1,19 +1,20 @@
 # Case action persistence and worker pipeline
 
 This Fuzail-owned integration records evidence-backed operational actions without deciding case-state
-policy or implementing trust verification.
+policy. It consumes Vatsal's canonical signed Trust/Access session instead of trusting client identity.
 
 ## API
 
 - `POST /api/v1/cases/:caseId/actions` records an immutable action. The request requires an
   `Idempotency-Key` header.
 - `GET /api/v1/cases/:caseId/actions` returns the case action timeline newest first.
-- Requests carry an `actorRef` and `purpose` as explicit authentication integration points. Vatsal's
-  trust/access layer must replace client assertions with verified identity and purpose before a
-  production deployment authorises these actions.
+- Both routes require a case-scoped Bearer trust session. The API derives `actorRef`, `actorRole`,
+  and `purpose` from that session and applies an action-specific role policy.
 
 Supported action types are `ALERT_BANK`, `ALERT_LEA`, `ESCALATE_CASE`, `ADD_ANALYST_NOTE`, and
-`MARK_OUTCOME`. Each action requires at least one evidence URL. Recording an action does not itself
+`ADD_OUTCOME_NOTE`. Each action requires at least one verified, same-case evidence-anchor ID;
+optional URLs are display metadata only. Actor, role, and purpose come from the signed trust session,
+never from the request body. Recording an action does not itself
 change the case state; Sandhya's case workflow remains the authority for intervention and outcome
 transitions.
 
@@ -33,7 +34,9 @@ development dispatch without changing the API or persistence contract.
 
 ## Verification
 
-- API tests cover create, replay, conflict, listing, and unknown cases.
-- Shared-contract tests require attributable actor, purpose, rationale, timestamp, and evidence.
-- PostgreSQL CI verifies the action and outbox event are committed together and that replay does not
-  duplicate either record.
+- API tests cover replay plus missing, forged, wrong-case, insufficient-capability, insufficient-role,
+  client-asserted-identity, missing-anchor, and cross-case-anchor rejection.
+- Shared-contract tests require rationale, timestamp, and evidence-anchor references; persisted events
+  additionally require the verified actor, role, and purpose.
+- PostgreSQL CI verifies atomic action/outbox commits, idempotent replay, and rollback when enqueueing
+  the outbox event fails.

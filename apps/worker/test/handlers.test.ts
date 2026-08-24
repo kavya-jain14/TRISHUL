@@ -8,8 +8,10 @@ const actionPayload = {
     caseId: 'case-worker-1',
     action: 'ALERT_BANK',
     actorRef: 'analyst-worker',
-    purpose: 'Provider response',
+    actorRole: 'INVESTIGATOR',
+    purpose: 'FRAUD_INVESTIGATION',
     rationale: 'Trace evidence requires bank review.',
+    evidenceAnchorIds: ['anchor:worker-1'],
     sourceUrls: ['https://example.test/evidence/worker-1'],
     occurredAt: '2026-08-24T14:00:00.000Z',
     recordedAt: '2026-08-24T14:00:01.000Z',
@@ -63,7 +65,7 @@ describe('development job handlers', () => {
 
     await expect(
       handler(
-        { action: { ...actionPayload.action, sourceUrls: [] } },
+        { action: { ...actionPayload.action, evidenceAnchorIds: [] } },
         { signal: new AbortController().signal, heartbeat: async () => undefined },
       ),
     ).rejects.toThrow();

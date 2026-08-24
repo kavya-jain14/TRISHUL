@@ -27,8 +27,10 @@ interface ActionRow {
   caseId: string;
   actionType: CaseActionRecord['action'];
   actorRef: string;
+  actorRole: CaseActionRecord['actorRole'];
   purpose: string;
   rationale: string;
+  evidenceAnchorIds: unknown;
   sourceUrls: unknown;
   occurredAt: Date | string;
   recordedAt: Date | string;
@@ -36,7 +38,8 @@ interface ActionRow {
 }
 
 const ACTION_COLUMNS = `ca.action_id AS "actionId", cases.external_case_id AS "caseId",
-  ca.action_type AS "actionType", ca.actor_ref AS "actorRef", ca.purpose, ca.rationale,
+  ca.action_type AS "actionType", ca.actor_ref AS "actorRef", ca.actor_role AS "actorRole",
+  ca.purpose, ca.rationale, ca.evidence_anchor_ids AS "evidenceAnchorIds",
   ca.source_urls AS "sourceUrls", ca.occurred_at AS "occurredAt",
   ca.recorded_at AS "recordedAt", ca.request_hash AS "requestHash"`;
 
@@ -57,12 +60,13 @@ export class PostgresCaseActionRepository implements CaseActionRepository {
 
       const inserted = await client.query<ActionRow>(
         `INSERT INTO case_actions
-          (action_id, case_id, action_type, actor_ref, purpose, rationale, source_urls,
-           occurred_at, recorded_at, idempotency_key, request_hash)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11)
+          (action_id, case_id, action_type, actor_ref, actor_role, purpose, rationale,
+           evidence_anchor_ids, source_urls, occurred_at, recorded_at, idempotency_key, request_hash)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$12,$13)
          ON CONFLICT DO NOTHING
-         RETURNING action_id AS "actionId", $12::text AS "caseId",
-           action_type AS "actionType", actor_ref AS "actorRef", purpose, rationale,
+         RETURNING action_id AS "actionId", $14::text AS "caseId",
+           action_type AS "actionType", actor_ref AS "actorRef", actor_role AS "actorRole",
+           purpose, rationale, evidence_anchor_ids AS "evidenceAnchorIds",
            source_urls AS "sourceUrls", occurred_at AS "occurredAt",
            recorded_at AS "recordedAt", request_hash AS "requestHash"`,
         [
@@ -70,8 +74,10 @@ export class PostgresCaseActionRepository implements CaseActionRepository {
           internalCase.id,
           action.action,
           action.actorRef,
+          action.actorRole,
           action.purpose,
           action.rationale,
+          JSON.stringify(action.evidenceAnchorIds),
           JSON.stringify(action.sourceUrls),
           action.occurredAt,
           action.recordedAt,
@@ -186,8 +192,10 @@ function mapAction(row: ActionRow): CaseActionRecord {
     caseId: row.caseId,
     action: row.actionType,
     actorRef: row.actorRef,
+    actorRole: row.actorRole,
     purpose: row.purpose,
     rationale: row.rationale,
+    evidenceAnchorIds: row.evidenceAnchorIds,
     sourceUrls: row.sourceUrls,
     occurredAt: iso(row.occurredAt),
     recordedAt: iso(row.recordedAt),

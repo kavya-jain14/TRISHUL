@@ -150,8 +150,10 @@ describe.skipIf(!databaseUrl)('PostgresOutboxRepository integration', () => {
         caseId: 'case-action-test',
         action: 'ALERT_LEA' as const,
         actorRef: 'analyst-pg',
-        purpose: 'Authorised fraud response',
+        actorRole: 'SUPERVISOR' as const,
+        purpose: 'FRAUD_INVESTIGATION' as const,
         rationale: 'Evidence-backed escalation to law enforcement.',
+        evidenceAnchorIds: ['anchor:action-pg-1'],
         sourceUrls: ['https://example.test/evidence/action-pg-1'],
         occurredAt: '2026-08-24T13:00:00.000Z',
         recordedAt: '2026-08-24T13:00:01.000Z',
@@ -174,6 +176,55 @@ describe.skipIf(!databaseUrl)('PostgresOutboxRepository integration', () => {
           payload: { action },
         }),
       ]);
+    } finally {
+      await cleanup(adminPool, pool, schema);
+    }
+  });
+
+  test('rolls back the case action when its outbox enqueue fails', async () => {
+    const { adminPool, pool, schema } = await isolatedDatabase(databaseUrl!);
+    try {
+      await pool.query(
+        `INSERT INTO cases (external_case_id, state, original_transaction_ref)
+         VALUES ($1, 'REPORTED', $2)`,
+        ['case-action-rollback', 'rrn-action-rollback'],
+      );
+      await pool.query(`
+        CREATE FUNCTION reject_case_action_event() RETURNS trigger AS $$
+        BEGIN
+          IF NEW.job_type = 'CASE_ACTION_EVENT' THEN
+            RAISE EXCEPTION 'forced outbox failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER reject_case_action_event_trigger
+          BEFORE INSERT ON outbox_jobs
+          FOR EACH ROW EXECUTE FUNCTION reject_case_action_event();
+      `);
+      const repository = new PostgresCaseActionRepository(pool);
+      const action = {
+        actionId: 'action-pg-rollback',
+        caseId: 'case-action-rollback',
+        action: 'ALERT_BANK' as const,
+        actorRef: 'investigator:rollback',
+        actorRole: 'INVESTIGATOR' as const,
+        purpose: 'FRAUD_INVESTIGATION' as const,
+        rationale: 'Verified evidence requires provider review.',
+        evidenceAnchorIds: ['anchor:rollback'],
+        sourceUrls: [],
+        occurredAt: '2026-08-24T13:10:00.000Z',
+        recordedAt: '2026-08-24T13:10:01.000Z',
+      };
+
+      await expect(
+        repository.record({
+          action,
+          idempotencyKey: 'action-pg-rollback-key',
+          requestHash: 'c'.repeat(64),
+        }),
+      ).rejects.toThrow('forced outbox failure');
+      expect((await pool.query(`SELECT action_id FROM case_actions`)).rows).toEqual([]);
     } finally {
       await cleanup(adminPool, pool, schema);
     }

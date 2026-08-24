@@ -27,3 +27,9 @@ export class InvalidRequestError extends DomainError {
     super(code, message, 400, details);
   }
 }
+
+export class ForbiddenError extends DomainError {
+  constructor(code: string, message: string, details?: unknown) {
+    super(code, message, 403, details);
+  }
+}

@@ -10,12 +10,16 @@ CREATE TABLE case_actions (
   action_id text PRIMARY KEY,
   case_id uuid NOT NULL REFERENCES cases(id),
   action_type text NOT NULL CHECK (action_type IN (
-    'ALERT_BANK', 'ALERT_LEA', 'ESCALATE_CASE', 'ADD_ANALYST_NOTE', 'MARK_OUTCOME'
+    'ALERT_BANK', 'ALERT_LEA', 'ESCALATE_CASE', 'ADD_ANALYST_NOTE', 'ADD_OUTCOME_NOTE'
   )),
   actor_ref text NOT NULL,
+  actor_role text NOT NULL CHECK (actor_role IN (
+    'INVESTIGATOR', 'SUPERVISOR', 'AUDITOR', 'LEA_OFFICER'
+  )),
   purpose text NOT NULL,
   rationale text NOT NULL,
-  source_urls jsonb NOT NULL,
+  evidence_anchor_ids jsonb NOT NULL,
+  source_urls jsonb NOT NULL DEFAULT '[]'::jsonb,
   occurred_at timestamptz NOT NULL,
   recorded_at timestamptz NOT NULL,
   idempotency_key text NOT NULL,

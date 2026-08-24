@@ -23,17 +23,20 @@ const actionRepository = pool
 const anchorRepository = pool
   ? new PostgresEvidenceAnchorRepository(pool)
   : new InMemoryEvidenceAnchorRepository();
+const evidenceAnchorService = new EvidenceAnchorService(
+  anchorRepository,
+  new DevelopmentHashchainProvider(),
+  (caseId) => caseService.getCase(caseId),
+);
 const app = buildApp({
   logger: true,
   caseService,
-  caseActionService: new CaseActionService(actionRepository, (caseId) =>
-    caseService.getCase(caseId),
-  ),
-  evidenceAnchorService: new EvidenceAnchorService(
-    anchorRepository,
-    new DevelopmentHashchainProvider(),
+  caseActionService: new CaseActionService(
+    actionRepository,
     (caseId) => caseService.getCase(caseId),
+    (anchorId) => evidenceAnchorService.get(anchorId),
   ),
+  evidenceAnchorService,
   persistenceMode: pool ? 'POSTGRESQL' : 'IN_MEMORY_DEVELOPMENT_ADAPTER',
 });
 
