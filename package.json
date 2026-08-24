@@ -2,14 +2,37 @@
   "name": "trishul",
   "version": "0.1.0",
   "private": true,
+  "description": "Predictive financial cyber-fraud intelligence and intervention platform",
+  "license": "UNLICENSED",
   "type": "module",
-  "engines": { "node": ">=24" },
-  "scripts": {
-    "test": "node --test --experimental-strip-types packages/ledger/src/ledger.test.ts packages/ledger/src/evidence-anchor.test.ts packages/worker/src/worker.test.ts apps/psp-sandbox/src/provider-simulator.test.ts",
-    "typecheck": "tsc --noEmit",
-    "verify": "npm run typecheck && npm run test",
-    "demo:psp": "node --experimental-strip-types apps/psp-sandbox/src/demo.ts"
+  "packageManager": "npm@11.9.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
   },
-  "dependencies": { "pg": "^8.16.3", "zod": "^4.1.12" },
-  "devDependencies": { "@types/node": "^24.0.0", "@types/pg": "^8.15.5", "typescript": "^5.9.2" }
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build:packages && npm run build:apps",
+    "build:packages": "npm run build --workspace @trishul/contracts && npm run build --workspace @trishul/database && npm run build --workspace @trishul/graph && npm run build --workspace @trishul/intelligence && npm run build --workspace @trishul/prediction && npm run build --workspace @trishul/trust && npm run build --workspace @trishul/audit",
+    "build:apps": "npm run build --workspace @trishul/api && npm run build --workspace @trishul/worker && npm run build --workspace @trishul/psp-sandbox && npm run build --workspace @trishul/web",
+    "check": "npm run format:check && npm run typecheck && npm test && npm run build",
+    "db:migrate": "npm run build --workspace @trishul/database && npm run migrate --workspace @trishul/database",
+    "dev:api": "npm run dev --workspace @trishul/api",
+    "dev:psp": "npm run dev --workspace @trishul/psp-sandbox",
+    "dev:web": "npm run dev --workspace @trishul/web",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run build:packages && vitest run",
+    "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
 }
