@@ -1,5 +1,10 @@
 import { Pool } from 'pg';
-import { InMemoryCaseActionRepository, PostgresCaseActionRepository } from '@trishul/database';
+import {
+  InMemoryCaseActionRepository,
+  InMemoryPaymentRiskRepository,
+  PostgresCaseActionRepository,
+  PostgresPaymentRiskRepository,
+} from '@trishul/database';
 import { DevelopmentHashchainProvider } from '@trishul/audit';
 import { PostgresIdentityResolutionRepository, PostgresTrustRepository } from '@trishul/database';
 import { InMemoryTrustRepository } from '@trishul/trust';
@@ -18,6 +23,7 @@ import {
   UnavailableIdentityResolutionProvider,
 } from './modules/identity-resolution/identity-resolution-service.js';
 import { trustAccessRuntimeFromEnvironment } from './modules/trust/runtime.js';
+import { PaymentRiskService } from './modules/payment-risk/service.js';
 
 const port = Number.parseInt(process.env.API_PORT ?? '4000', 10);
 const host = process.env.API_HOST ?? '0.0.0.0';
@@ -49,6 +55,14 @@ const identityProvider =
   process.env.NODE_ENV === 'production'
     ? new UnavailableIdentityResolutionProvider()
     : new ReferenceOnlyDevelopmentIdentityProvider();
+const paymentRiskRepository = pool
+  ? new PostgresPaymentRiskRepository(pool)
+  : new InMemoryPaymentRiskRepository();
+const enforcePaymentRiskServiceToken = process.env.NODE_ENV === 'production';
+const paymentRiskServiceToken = process.env.TRISHUL_INTERNAL_SERVICE_TOKEN;
+if (enforcePaymentRiskServiceToken && !paymentRiskServiceToken) {
+  throw new Error('TRISHUL_INTERNAL_SERVICE_TOKEN is required in production.');
+}
 const app = buildApp({
   logger: true,
   caseService,
@@ -65,6 +79,9 @@ const app = buildApp({
     identityProvider,
     (caseId) => caseService.getCase(caseId),
   ),
+  paymentRiskService: new PaymentRiskService(paymentRiskRepository),
+  enforcePaymentRiskServiceToken,
+  ...(paymentRiskServiceToken ? { paymentRiskServiceToken } : {}),
   persistenceMode: pool ? 'POSTGRESQL' : 'IN_MEMORY_DEVELOPMENT_ADAPTER',
 });
 

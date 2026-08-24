@@ -4,7 +4,7 @@ import { InMemoryTrustRepository, TrustAccessError, TrustAccessService } from '@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { DomainError } from './domain/errors.js';
-import { InMemoryCaseActionRepository } from '@trishul/database';
+import { InMemoryCaseActionRepository, InMemoryPaymentRiskRepository } from '@trishul/database';
 import { registerCaseActionRoutes } from './modules/case-actions/routes.js';
 import { CaseActionService } from './modules/case-actions/service.js';
 import { InMemoryCaseRepository } from './modules/cases/case-repository.js';
@@ -22,6 +22,8 @@ import {
 } from './modules/identity-resolution/identity-resolution-service.js';
 import { InMemoryIdentityResolutionRepository } from './modules/identity-resolution/in-memory-identity-resolution-repository.js';
 import { registerIdentityResolutionRoutes } from './modules/identity-resolution/routes.js';
+import { registerPaymentRiskRoutes } from './modules/payment-risk/routes.js';
+import { PaymentRiskService } from './modules/payment-risk/service.js';
 
 export interface BuildAppOptions {
   logger?: boolean;
@@ -30,6 +32,9 @@ export interface BuildAppOptions {
   caseActionService?: CaseActionService;
   trustAccessService?: TrustAccessService;
   identityResolutionService?: IdentityResolutionService;
+  paymentRiskService?: PaymentRiskService;
+  enforcePaymentRiskServiceToken?: boolean;
+  paymentRiskServiceToken?: string;
   enforceTrustAccess?: boolean;
   persistenceMode?: 'IN_MEMORY_DEVELOPMENT_ADAPTER' | 'POSTGRESQL';
 }
@@ -73,6 +78,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       (caseId) => caseService.getCase(caseId),
     );
   registerIdentityResolutionRoutes(app, identityResolutionService, trustAccessService);
+  const paymentRiskService =
+    options.paymentRiskService ?? new PaymentRiskService(new InMemoryPaymentRiskRepository());
+  registerPaymentRiskRoutes(app, paymentRiskService, {
+    ...(options.enforcePaymentRiskServiceToken !== undefined
+      ? { enforceServiceToken: options.enforcePaymentRiskServiceToken }
+      : {}),
+    ...(options.paymentRiskServiceToken ? { serviceToken: options.paymentRiskServiceToken } : {}),
+  });
 
   app.get('/api/v1/health', async () => ({
     status: 'ok',
@@ -118,6 +131,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       'REPLAY_SAFE_NONCE_VERIFICATION',
       'TWO_PERSON_IDENTITY_RESOLUTION',
       'REFERENCE_ONLY_IDENTITY_RESPONSE',
+      'EXPLAINABLE_PRE_PAYMENT_RISK',
+      'PAYER_STEP_UP_DECISION',
+      'TRUST_RISK_SEPARATION',
+      'DURABLE_PAYMENT_RISK_HISTORY',
     ],
   }));
 

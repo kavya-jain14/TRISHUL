@@ -33,3 +33,9 @@ export class ForbiddenError extends DomainError {
     super(code, message, 403, details);
   }
 }
+
+export class UnauthorizedError extends DomainError {
+  constructor(code: string, message: string, details?: unknown) {
+    super(code, message, 401, details);
+  }
+}
