@@ -4,7 +4,12 @@ import { InMemoryTrustRepository, TrustAccessError, TrustAccessService } from '@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { DomainError } from './domain/errors.js';
-import { InMemoryCaseActionRepository, InMemoryPaymentRiskRepository } from '@trishul/database';
+import {
+  InMemoryCaseActionRepository,
+  InMemoryNetworkMemoryRepository,
+  InMemoryPaymentRiskRepository,
+  type NetworkMemoryRepository,
+} from '@trishul/database';
 import { registerCaseActionRoutes } from './modules/case-actions/routes.js';
 import { CaseActionService } from './modules/case-actions/service.js';
 import { InMemoryCaseRepository } from './modules/cases/case-repository.js';
@@ -24,6 +29,8 @@ import { InMemoryIdentityResolutionRepository } from './modules/identity-resolut
 import { registerIdentityResolutionRoutes } from './modules/identity-resolution/routes.js';
 import { registerPaymentRiskRoutes } from './modules/payment-risk/routes.js';
 import { PaymentRiskService } from './modules/payment-risk/service.js';
+import { registerNetworkMemoryRoutes } from './modules/network-memory/routes.js';
+import { CrossCaseCorrelationService } from './modules/network-memory/service.js';
 
 export interface BuildAppOptions {
   logger?: boolean;
@@ -33,6 +40,8 @@ export interface BuildAppOptions {
   trustAccessService?: TrustAccessService;
   identityResolutionService?: IdentityResolutionService;
   paymentRiskService?: PaymentRiskService;
+  networkMemoryRepository?: NetworkMemoryRepository;
+  crossCaseCorrelationService?: CrossCaseCorrelationService;
   enforcePaymentRiskServiceToken?: boolean;
   paymentRiskServiceToken?: string;
   enforceTrustAccess?: boolean;
@@ -47,7 +56,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     methods: ['GET', 'POST', 'OPTIONS'],
   });
 
-  const caseService = options.caseService ?? new CaseService(new InMemoryCaseRepository());
+  const networkMemoryRepository =
+    options.networkMemoryRepository ?? new InMemoryNetworkMemoryRepository();
+  const caseService =
+    options.caseService ??
+    new CaseService(new InMemoryCaseRepository(), undefined, (caseId, graphVersion, accountId) =>
+      networkMemoryRepository.latestSignal(caseId, graphVersion, accountId),
+    );
   const trustAccessService =
     options.trustAccessService ?? new TrustAccessService(new InMemoryTrustRepository());
   if (options.enforceTrustAccess) registerTrustAccessGuard(app, trustAccessService);
@@ -66,6 +81,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       (anchorId) => evidenceAnchorService.get(anchorId),
     );
   registerCaseRoutes(app, caseService);
+  const crossCaseCorrelationService =
+    options.crossCaseCorrelationService ??
+    new CrossCaseCorrelationService(networkMemoryRepository, (caseId) =>
+      caseService.getLatestGraph(caseId),
+    );
+  registerNetworkMemoryRoutes(app, crossCaseCorrelationService);
   registerCaseActionRoutes(app, caseActionService, trustAccessService);
   registerEvidenceAnchorRoutes(app, evidenceAnchorService);
   registerTrustRoutes(app, trustAccessService);
@@ -135,6 +156,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       'PAYER_STEP_UP_DECISION',
       'TRUST_RISK_SEPARATION',
       'DURABLE_PAYMENT_RISK_HISTORY',
+      'CROSS_CASE_NETWORK_MEMORY',
+      'OPAQUE_CASE_CORRELATION',
+      'TRUSTED_OUTCOME_WEIGHTING',
+      'INTERNAL_CORRELATION_TO_MULE_RISK',
     ],
   }));
 

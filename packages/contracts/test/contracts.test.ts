@@ -5,6 +5,7 @@ import {
   ForecastSnapshotSchema,
   ExitModeRequestSchema,
   GraphEdgeSchema,
+  HistoricalInstitutionalOutcomeSchema,
   IdempotencyKeySchema,
   ProviderEventBatchSchema,
   ProviderEventSchema,
@@ -95,6 +96,31 @@ describe('shared contracts', () => {
   it('validates bounded idempotency keys', () => {
     expect(IdempotencyKeySchema.safeParse('complaint:create:golden-a').success).toBe(true);
     expect(IdempotencyKeySchema.safeParse('x'.repeat(97)).success).toBe(false);
+  });
+
+  it('accepts only verified institutional or labelled simulator outcomes for network memory', () => {
+    expect(
+      HistoricalInstitutionalOutcomeSchema.safeParse({
+        status: 'CONFIRMED',
+        provenance,
+      }).success,
+    ).toBe(true);
+    expect(
+      HistoricalInstitutionalOutcomeSchema.safeParse({
+        status: 'CONFIRMED',
+        provenance: {
+          ...provenance,
+          sourceType: 'BANK',
+          evidenceState: 'SUBMITTED',
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      HistoricalInstitutionalOutcomeSchema.safeParse({
+        status: 'CONFIRMED',
+        provenance: { ...provenance, sourceType: 'COMPLAINT' },
+      }).success,
+    ).toBe(false);
   });
 
   it('accepts independent geo/time abstention as a valid forecast', () => {

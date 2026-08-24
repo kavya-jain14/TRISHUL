@@ -134,6 +134,7 @@ export const MuleAssessmentSnapshotSchema = z
     ruleVersion: z.literal('mule-risk-v1'),
     calculationInputHash: z.string().regex(/^[a-f0-9]{64}$/),
     signalProvenance: AuthorisedSignalProvenanceSchema,
+    crossCaseCorrelationRunId: IdentifierSchema.optional(),
     trustedOutcome: TrustedOutcomeInputSchema,
     assessedAt: IsoDateTimeSchema,
   })

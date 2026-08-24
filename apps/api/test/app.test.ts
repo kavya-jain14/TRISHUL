@@ -55,6 +55,10 @@ describe('TRISHUL API foundation', () => {
         'PAYER_STEP_UP_DECISION',
         'TRUST_RISK_SEPARATION',
         'DURABLE_PAYMENT_RISK_HISTORY',
+        'CROSS_CASE_NETWORK_MEMORY',
+        'OPAQUE_CASE_CORRELATION',
+        'TRUSTED_OUTCOME_WEIGHTING',
+        'INTERNAL_CORRELATION_TO_MULE_RISK',
       ]),
     );
   });

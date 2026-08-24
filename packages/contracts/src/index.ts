@@ -12,3 +12,4 @@ export * from './state-machine.js';
 export * from './trace.js';
 export * from './trust.js';
 export * from './identity.js';
+export * from './network-memory.js';
