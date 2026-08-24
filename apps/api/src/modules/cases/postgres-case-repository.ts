@@ -5,12 +5,14 @@ import {
   EvidenceGateSnapshotSchema,
   ExposureSnapshotSchema,
   ExitModeSnapshotSchema,
+  ForecastSnapshotSchema,
   GraphSnapshotSchema,
   MuleAssessmentSnapshotSchema,
   ProviderEventSchema,
   type ExposureSnapshot,
   type EvidenceGateSnapshot,
   type ExitModeSnapshot,
+  type ForecastSnapshot,
   type MuleAssessmentSnapshot,
   type ProviderEvent,
 } from '@trishul/contracts';
@@ -354,6 +356,69 @@ export class PostgresCaseRepository implements CaseRepository {
         evaluatedAt: iso(gateRow.evaluated_at),
       }),
     );
+
+    const forecastResult = await this.pool.query<{
+      prediction_ref: string;
+      previous_prediction_ref: string | null;
+      evidence_gate_ref: string;
+      graph_version: number;
+      account_ref: string;
+      exit_mode: string;
+      evidence_gate_decision: string;
+      geo_output: unknown;
+      time_output: unknown;
+      feature_version: string;
+      model_version: string;
+      rule_version: string;
+      calculation_input_hash: string;
+      confidence: string | number;
+      reason_codes: unknown;
+      generated_at: Date | string;
+    }>(
+      `SELECT
+         fs.prediction_ref,
+         fs.previous_prediction_ref,
+         fs.evidence_gate_ref,
+         fs.graph_version,
+         a.provider_account_ref AS account_ref,
+         fs.exit_mode,
+         fs.evidence_gate_decision,
+         fs.geo_output,
+         fs.time_output,
+         fs.feature_version,
+         fs.model_version,
+         fs.rule_version,
+         fs.calculation_input_hash,
+         fs.confidence,
+         fs.reason_codes,
+         fs.generated_at
+       FROM prediction_runs fs
+       JOIN accounts a ON a.id = fs.account_id
+       WHERE fs.case_id = $1 AND fs.prediction_ref IS NOT NULL
+       ORDER BY fs.graph_version`,
+      [row.internal_case_id],
+    );
+    const forecastSnapshots = forecastResult.rows.map((forecastRow) =>
+      ForecastSnapshotSchema.parse({
+        predictionRunId: forecastRow.prediction_ref,
+        previousPredictionRunId: forecastRow.previous_prediction_ref,
+        evidenceGateRunId: forecastRow.evidence_gate_ref,
+        caseId: row.external_case_id,
+        accountId: forecastRow.account_ref,
+        graphVersion: forecastRow.graph_version,
+        generatedAt: iso(forecastRow.generated_at),
+        exitMode: forecastRow.exit_mode,
+        evidenceGateDecision: forecastRow.evidence_gate_decision,
+        geo: jsonValue(forecastRow.geo_output),
+        time: jsonValue(forecastRow.time_output),
+        featureVersion: forecastRow.feature_version,
+        modelVersion: forecastRow.model_version,
+        ruleVersion: forecastRow.rule_version,
+        calculationInputHash: forecastRow.calculation_input_hash,
+        confidence: Number(forecastRow.confidence),
+        reasonCodes: jsonValue(forecastRow.reason_codes),
+      }),
+    );
     const resolution = providerEvents.find((event) => event.type === 'RESOLVE_TRANSACTION');
 
     return {
@@ -393,6 +458,7 @@ export class PostgresCaseRepository implements CaseRepository {
       muleAssessments,
       exitModeSnapshots,
       evidenceGateSnapshots,
+      forecastSnapshots,
     };
   }
 
@@ -757,6 +823,65 @@ export class PostgresCaseRepository implements CaseRepository {
           throw new ConflictError(
             'EVIDENCE_GATE_VERSION_IMMUTABLE',
             `Evidence Gate for graph version ${snapshot.graphVersion} already exists with different inputs`,
+          );
+        }
+      }
+
+      for (const snapshot of record.forecastSnapshots) {
+        const gate = record.evidenceGateSnapshots.find(
+          (candidate) => candidate.evidenceGateRunId === snapshot.evidenceGateRunId,
+        );
+        if (!gate) {
+          throw new ConflictError(
+            'EVIDENCE_GATE_NOT_AVAILABLE',
+            `Forecast ${snapshot.predictionRunId} references an unknown Evidence Gate`,
+          );
+        }
+        const snapshotAccountId = await accountId(
+          client,
+          gate.geo.provenance.sourceName,
+          snapshot.accountId,
+        );
+        const result = await client.query<{ prediction_ref: string }>(
+          `INSERT INTO prediction_runs (
+             prediction_ref, previous_prediction_ref, evidence_gate_ref, case_id, account_id,
+             graph_version, exit_mode, evidence_gate_decision, geo_output, time_output,
+             feature_version, model_version, rule_version, calculation_input_hash, confidence,
+             evidence_coverage, gate_outcome, reason_codes, generated_at
+           ) VALUES (
+             $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13,
+             $14, $15, $16, $17, $18::jsonb, $19
+           )
+           ON CONFLICT (prediction_ref) DO UPDATE SET
+             generated_at = prediction_runs.generated_at
+           WHERE prediction_runs.calculation_input_hash = EXCLUDED.calculation_input_hash
+           RETURNING prediction_ref`,
+          [
+            snapshot.predictionRunId,
+            snapshot.previousPredictionRunId,
+            snapshot.evidenceGateRunId,
+            internalCaseId,
+            snapshotAccountId,
+            snapshot.graphVersion,
+            snapshot.exitMode,
+            snapshot.evidenceGateDecision,
+            JSON.stringify(snapshot.geo),
+            JSON.stringify(snapshot.time),
+            snapshot.featureVersion,
+            snapshot.modelVersion,
+            snapshot.ruleVersion,
+            snapshot.calculationInputHash,
+            snapshot.confidence,
+            Number(((gate.geo.coverageScore + gate.time.coverageScore) / 2).toFixed(4)),
+            gate.overallDecision === 'ABSTAIN' ? 'ABSTAIN' : 'PASS',
+            JSON.stringify(snapshot.reasonCodes),
+            snapshot.generatedAt,
+          ],
+        );
+        if (result.rows.length === 0) {
+          throw new ConflictError(
+            'FORECAST_VERSION_IMMUTABLE',
+            `Forecast for graph version ${snapshot.graphVersion} already exists with different inputs`,
           );
         }
       }

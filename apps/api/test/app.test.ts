@@ -32,13 +32,16 @@ describe('TRISHUL API foundation', () => {
       predictionCanAbstain: true,
     });
     expect(response.json()).toMatchObject({
-      phase: 'EVIDENCE_ANCHOR_BACKEND_SLICE',
+      phase: 'PHASE_4_ZONE_TIME_REFORECAST',
     });
     expect(response.json().capabilities).toEqual(
       expect.arrayContaining([
         'VERSIONED_EXIT_MODE',
         'INDEPENDENT_EVIDENCE_GATE',
         'INTENTIONAL_ABSTENTION',
+        'TOP_K_GEO_FORECAST',
+        'TIME_HORIZON_FORECAST',
+        'VERSIONED_REFORECAST',
         'PII_FREE_EVIDENCE_ANCHORING',
         'TAMPER_EVIDENT_VERIFICATION',
         'REPLACEABLE_BLOCKCHAIN_PROVIDER',

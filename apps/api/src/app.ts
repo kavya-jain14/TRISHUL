@@ -45,7 +45,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   app.get('/api/v1/system/manifest', async () => ({
     product: 'TRISHUL',
-    phase: 'EVIDENCE_ANCHOR_BACKEND_SLICE',
+    phase: 'PHASE_4_ZONE_TIME_REFORECAST',
     persistenceMode: options.persistenceMode ?? 'IN_MEMORY_DEVELOPMENT_ADAPTER',
     doctrine: {
       intentInference: false,
@@ -66,6 +66,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       'VERSIONED_EXIT_MODE',
       'INDEPENDENT_EVIDENCE_GATE',
       'INTENTIONAL_ABSTENTION',
+      'TOP_K_GEO_FORECAST',
+      'TIME_HORIZON_FORECAST',
+      'VERSIONED_REFORECAST',
       'PII_FREE_EVIDENCE_ANCHORING',
       'TAMPER_EVIDENT_VERIFICATION',
       'REPLACEABLE_BLOCKCHAIN_PROVIDER',
