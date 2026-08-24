@@ -141,7 +141,7 @@ async function isolatedDatabase(connectionString: string) {
   const adminPool = new Pool({ connectionString, max: 1 });
   await adminPool.query(`CREATE SCHEMA "${schema}"`);
   const pool = new Pool({ connectionString, max: 4, options: `-c search_path=${schema}` });
-  for (const migrationFile of ['001_core.sql', '003_durable_outbox.sql']) {
+  for (const migrationFile of ['001_core.sql', '004_durable_outbox.sql']) {
     const migration = await readFile(
       new URL(`../migrations/${migrationFile}`, import.meta.url),
       'utf8',

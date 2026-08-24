@@ -42,8 +42,9 @@ describe('PostgresCaseRepository', () => {
     });
     const adapter = database.adapters.createPg();
     const pool = new adapter.Pool() as unknown as Pool;
-    const migration = await readFile(DATABASE_ASSETS.migrations[0], 'utf8');
-    await pool.query(migration);
+    for (const migrationUrl of DATABASE_ASSETS.migrations) {
+      await pool.query(await readFile(migrationUrl, 'utf8'));
+    }
 
     const service = new CaseService(
       new PostgresCaseRepository(pool),
@@ -142,6 +143,11 @@ describe('PostgresCaseRepository', () => {
       },
       'pg-evidence-gate-v1',
     );
+    await service.runForecast(
+      caseId,
+      { accountId: 'acct-a-pg', geoCandidates: [], timeHorizons: [] },
+      'pg-forecast-v1',
+    );
 
     const restartedService = new CaseService(new PostgresCaseRepository(pool));
     const restored = await restartedService.getCase(caseId);
@@ -150,6 +156,7 @@ describe('PostgresCaseRepository', () => {
     const restoredRisk = await restartedService.getRiskSnapshots(caseId);
     const restoredExitMode = await restartedService.getLatestExitMode(caseId);
     const restoredGate = await restartedService.getLatestForecastEvidence(caseId);
+    const restoredForecast = await restartedService.getLatestForecast(caseId);
     const replay = await restartedService.createComplaint(complaint, 'pg-complaint-create');
 
     expect(created.replayed).toBe(false);
@@ -165,6 +172,12 @@ describe('PostgresCaseRepository', () => {
     expect(restoredRisk[0]?.state).not.toBe('CONFIRMED');
     expect(restoredExitMode.selectedMode).toBe('STATIONARY');
     expect(restoredGate.overallDecision).toBe('ABSTAIN');
+    expect(restoredForecast).toMatchObject({
+      graphVersion: 1,
+      exitMode: 'STATIONARY',
+      geo: { decision: 'ABSTAIN' },
+      time: { decision: 'ABSTAIN' },
+    });
     expect(replay.replayed).toBe(true);
 
     await expect(
@@ -192,6 +205,7 @@ describe('PostgresCaseRepository', () => {
       assessments: string;
       exit_modes: string;
       evidence_gates: string;
+      forecasts: string;
     }>(
       `SELECT
          (SELECT count(*) FROM cases)::text AS cases,
@@ -202,7 +216,8 @@ describe('PostgresCaseRepository', () => {
          (SELECT count(*) FROM exposure_states)::text AS exposures,
          (SELECT count(*) FROM mule_assessments)::text AS assessments,
          (SELECT count(*) FROM exit_mode_snapshots)::text AS exit_modes,
-         (SELECT count(*) FROM evidence_gate_snapshots)::text AS evidence_gates`,
+         (SELECT count(*) FROM evidence_gate_snapshots)::text AS evidence_gates,
+         (SELECT count(*) FROM prediction_runs WHERE prediction_ref IS NOT NULL)::text AS forecasts`,
     );
     const count = (value: string) => Number(value.replaceAll(/[()]/g, ''));
     expect(count(counts.rows[0]?.cases ?? '0')).toBe(1);
@@ -214,6 +229,7 @@ describe('PostgresCaseRepository', () => {
     expect(count(counts.rows[0]?.assessments ?? '0')).toBe(1);
     expect(count(counts.rows[0]?.exit_modes ?? '0')).toBe(1);
     expect(count(counts.rows[0]?.evidence_gates ?? '0')).toBe(1);
+    expect(count(counts.rows[0]?.forecasts ?? '0')).toBe(1);
 
     await pool.end();
   });
