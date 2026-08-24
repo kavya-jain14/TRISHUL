@@ -5,7 +5,9 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
-    "test": "node --test --experimental-strip-types packages/ledger/src/ledger.test.ts packages/ledger/src/evidence-anchor.test.ts packages/worker/src/worker.test.ts packages/worker/src/persistent-worker.test.ts packages/database/src/postgres.test.ts apps/psp-sandbox/src/provider-simulator.test.ts",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "node --test --experimental-strip-types packages/ledger/src/ledger.test.ts packages/ledger/src/evidence-anchor.test.ts packages/worker/src/worker.test.ts packages/worker/src/persistent-worker.test.ts packages/database/src/postgres.test.ts apps/psp-sandbox/src/provider-simulator.test.ts apps/api/src/server.test.ts",
+    "test:integration": "node --test --experimental-strip-types packages/database/src/postgres.integration.test.ts",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm run test",
     "demo:psp": "node --experimental-strip-types apps/psp-sandbox/src/demo.ts"

@@ -1,0 +1,16 @@
+services:
+  postgres-integration:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: trishul_test
+      POSTGRES_USER: trishul_test
+      POSTGRES_PASSWORD: trishul_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trishul_test -d trishul_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    tmpfs:
+      - /var/lib/postgresql/data

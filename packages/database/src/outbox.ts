@@ -32,6 +32,16 @@ export type QueueHealth = {
   reason?: string;
 };
 
+export type DeadLetterJob = {
+  deadLetterId: string;
+  jobId: string;
+  type: PersistentJobType;
+  payload: unknown;
+  idempotencyKey: string;
+  failureReason: string;
+  failedAt: string;
+};
+
 type JobRow = {
   jobId: string;
   jobType: PersistentJobType;
@@ -230,6 +240,33 @@ export class PostgresOutboxRepository {
     } finally {
       client.release();
     }
+  }
+
+  async listOpenDeadLetters(limit = 100): Promise<readonly DeadLetterJob[]> {
+    const result = await this.#pool.query<{
+      deadLetterId: string;
+      jobId: string;
+      jobType: PersistentJobType;
+      payload: unknown;
+      idempotencyKey: string;
+      failureReason: string;
+      failedAt: string | Date;
+    }>(
+      `SELECT dead_letter_id AS "deadLetterId", job_id AS "jobId", job_type AS "jobType",
+        payload, idempotency_key AS "idempotencyKey", failure_reason AS "failureReason",
+        failed_at AS "failedAt"
+       FROM dead_letter_jobs WHERE replayed_at IS NULL ORDER BY failed_at DESC LIMIT $1`,
+      [limit]
+    );
+    return result.rows.map((row) => ({
+      deadLetterId: row.deadLetterId,
+      jobId: row.jobId,
+      type: row.jobType,
+      payload: row.payload,
+      idempotencyKey: row.idempotencyKey,
+      failureReason: row.failureReason,
+      failedAt: iso(row.failedAt)
+    }));
   }
 
   async metrics(now: string): Promise<QueueMetrics> {

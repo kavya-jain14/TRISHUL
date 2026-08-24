@@ -1,0 +1,47 @@
+name: Fuzail backend verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - "apps/psp-sandbox/**"
+      - "packages/contracts/**"
+      - "packages/database/**"
+      - "packages/ledger/**"
+      - "packages/worker/**"
+      - "package.json"
+      - "tsconfig.json"
+      - ".github/workflows/fuzail-backend.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: trishul_test
+          POSTGRES_USER: trishul_test
+          POSTGRES_PASSWORD: trishul_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U trishul_test -d trishul_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      TEST_DATABASE_URL: postgres://trishul_test:trishul_test@127.0.0.1:5432/trishul_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
