@@ -61,13 +61,23 @@ describe('golden complaint-to-trace integration', () => {
       expect(readiness.exitMode?.selectedMode).toBe('CASH_OUT_LIKELY');
       expect(readiness.exitMode?.features).not.toHaveProperty('observedCashOut');
       expect(readiness.evidenceGate).toMatchObject({
-        overallDecision: 'PARTIAL',
+        overallDecision: 'PREDICT',
         geo: { decision: 'PASS', coverageState: 'HIGH' },
-        time: { decision: 'ABSTAIN' },
+        time: { decision: 'PASS', coverageState: 'HIGH' },
       });
       expect(readiness.evidenceGate?.geo).not.toHaveProperty('candidates');
       expect(readiness.evidenceGate?.time).not.toHaveProperty('horizons');
-      expect(progress.at(-1)).toBe('Exit mode and Evidence Gate ready');
+      expect(readiness.forecast?.geo).toMatchObject({ decision: 'PREDICT' });
+      expect(readiness.forecast?.time).toMatchObject({
+        decision: 'PREDICT',
+        highestRiskBucket: '1_TO_2_HOURS',
+      });
+      expect(
+        readiness.forecast?.geo.decision === 'PREDICT'
+          ? readiness.forecast.geo.candidates[0]?.zoneId
+          : null,
+      ).toBe('zone-noida-sector-62');
+      expect(progress.at(-1)).toBe('Evidence-gated zone and time forecast ready');
     } finally {
       await Promise.all([api.close(), sandbox.close()]);
     }
@@ -107,7 +117,12 @@ describe('golden complaint-to-trace integration', () => {
       expect(readiness.evidenceGate?.geo.decision).toBe('ABSTAIN');
       expect(readiness.evidenceGate?.time.decision).toBe('ABSTAIN');
       expect(readiness.evidenceGate?.geo.missingEvidence).toContain('EXIT_MODE_NOT_CASH_OUT');
-      expect(progress.at(-1)).toBe('Stationary funds retained; intentional abstention ready');
+      expect(readiness.forecast).toMatchObject({
+        confidence: 0,
+        geo: { decision: 'ABSTAIN' },
+        time: { decision: 'ABSTAIN' },
+      });
+      expect(progress.at(-1)).toBe('Stationary funds retained; explicit forecast abstention ready');
     } finally {
       await Promise.all([api.close(), sandbox.close()]);
     }
