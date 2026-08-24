@@ -1,17 +1,30 @@
 # Fuzail backend handoff
 
+## Two-phase delivery plan
+
+- **Phase 1 — durable backend foundation:** PostgreSQL workers, dead-letter/replay, health/metrics/logging, alerts, and case persistence.
+- **Phase 2 — exposed integration:** isolated PostgreSQL integration tests and authenticated trace/ledger backend API routes.
+
 ## Ready now
 
-- PostgreSQL migrations: `001_fuzail_ledger_outbox.sql` and `002_case_persistence.sql`.
+- PostgreSQL migrations: `001_fuzail_ledger_outbox.sql` and `002_fuzail_operations.sql`.
 - Atomic payment-event plus trace-refresh outbox write: `PostgresPaymentEventRepository`.
 - Append-only case, complaint, graph-version, risk-snapshot, and forecast persistence: `PostgresCaseRepository`.
-- In-memory workers already verify idempotency, retry/backoff, alerts, and evidence anchoring.
+- PostgreSQL-leased workers with retry/backoff, expired-lease recovery, dead-lettering, and replay.
+- Persistent alerts with acknowledgement and per-case timelines.
+- Queue health, metrics, and JSON structured worker logs.
+- In-memory workers remain available for deterministic demos and fast unit tests.
 
 ## Requires deployment configuration
 
-- A PostgreSQL database and a migration runner for the supplied migration.
-- A Redis instance plus a persistent worker runtime to replace the demo in-memory outbox.
-- Server-side `DATABASE_URL` and `REDIS_URL`; do not expose either to frontend code.
+- A PostgreSQL database and migration runner for the supplied migrations.
+- A continuously running process that invokes `PersistentOutboxWorker` for each registered job type.
+- Server-side `DATABASE_URL`; do not expose it to frontend code.
+
+## Phase 2 remaining
+
+- Run PostgreSQL integration tests against an isolated test database.
+- Expose trace, ledger, case, alert, health, metrics, and dead-letter replay through authenticated API boundaries.
 
 ## Needs another owner before integration
 
@@ -21,5 +34,5 @@
 
 ## Not a production claim
 
-The current repository is a deterministic SIH demo prototype. It has no live bank/NPCI data, deployed PostgreSQL/Redis service, real issuer, or permissioned blockchain network.
+The current repository has production-oriented persistence boundaries but no live bank/NPCI data, deployed PostgreSQL service, real issuer, or permissioned blockchain network.
 

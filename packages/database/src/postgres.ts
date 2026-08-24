@@ -72,4 +72,8 @@ export class PostgresPaymentEventRepository {
 }
 
 export const fuzailMigration = "packages/database/migrations/001_fuzail_ledger_outbox.sql";
+export const fuzailMigrations = [
+  "packages/database/migrations/001_fuzail_ledger_outbox.sql",
+  "packages/database/migrations/002_fuzail_operations.sql"
+] as const;
 

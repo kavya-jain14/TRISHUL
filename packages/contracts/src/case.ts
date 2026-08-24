@@ -90,6 +90,20 @@ export const alertSeveritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"])
 export type InterventionState = z.infer<typeof interventionStateSchema>;
 export type AlertSeverity = z.infer<typeof alertSeveritySchema>;
 
+export const alertJobPayloadSchema = z.object({
+  alertId: z.string().min(1),
+  caseId: z.string().min(1),
+  severity: alertSeveritySchema,
+  kind: z.enum(["TRACE_RISK", "EVIDENCE_INTEGRITY", "INTERVENTION", "SYSTEM"]),
+  title: z.string().min(1),
+  message: z.string().min(1),
+  sourceEventId: z.string().min(1).optional(),
+  sourceUrls: z.array(z.url()).default([]),
+  createdAt: z.iso.datetime({ offset: true })
+}).strict();
+
+export type AlertJobPayload = z.infer<typeof alertJobPayloadSchema>;
+
 export const caseActionRequestSchema = z.object({
   idempotencyKey: z.string().min(1),
   action: z.enum(["ALERT_BANK", "ALERT_LEA", "ESCALATE_CASE", "ADD_ANALYST_NOTE", "MARK_OUTCOME"]),

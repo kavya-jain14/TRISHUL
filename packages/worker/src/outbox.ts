@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-export type OutboxType = "TRACE_REFRESH" | "EVIDENCE_ANCHOR";
+export type OutboxType = "TRACE_REFRESH" | "EVIDENCE_ANCHOR" | "ALERT";
 export type OutboxStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
 export type Attempt = { attemptedAt: string; outcome: "FAILED" | "SUCCEEDED"; error?: string };
 export type OutboxJob = {
