@@ -1,6 +1,7 @@
 export * from './alerts.js';
 export * from './case-actions.js';
 export * from './cases.js';
+export * from './command-center.js';
 export * from './common.js';
 export * from './evidence-anchor.js';
 export * from './exposure.js';

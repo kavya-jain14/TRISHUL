@@ -32,7 +32,7 @@ describe('TRISHUL API foundation', () => {
       predictionCanAbstain: true,
     });
     expect(response.json()).toMatchObject({
-      phase: 'PHASE_4_ZONE_TIME_REFORECAST',
+      phase: 'PHASE_7_COMMAND_CENTER_ALERTS',
       trustAccessMode: 'OPTIONAL_DEVELOPMENT_ADAPTER',
     });
     expect(response.json().capabilities).toEqual(
@@ -59,6 +59,10 @@ describe('TRISHUL API foundation', () => {
         'OPAQUE_CASE_CORRELATION',
         'TRUSTED_OUTCOME_WEIGHTING',
         'INTERNAL_CORRELATION_TO_MULE_RISK',
+        'DETERMINISTIC_CASE_PRIORITY',
+        'OPERATIONAL_INTERVENTION_STATES',
+        'TRUST_SCOPED_COMMAND_CENTER',
+        'DURABLE_ALERT_LIFECYCLE',
       ]),
     );
   });

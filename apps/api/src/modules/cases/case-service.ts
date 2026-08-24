@@ -123,6 +123,11 @@ export class CaseService {
     return this.toDetail(await this.requireCase(caseId));
   }
 
+  /** Internal read model input; never exposed directly over HTTP. */
+  async getOperationalCaseRecord(caseId: string): Promise<CaseRecord> {
+    return structuredClone(await this.requireCase(caseId));
+  }
+
   async resolveTransaction(
     caseId: string,
     rawEvent: unknown,
