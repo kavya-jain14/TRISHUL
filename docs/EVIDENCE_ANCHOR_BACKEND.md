@@ -21,6 +21,10 @@ This checkpoint accelerates the backend integrity work from the later delivery s
   receipt, and asks the gateway to verify the exact anchor reference and transaction hash.
 - Production refuses to start with the development hashchain. The remote adapter requires HTTPS,
   a service token, bounded responses, an operation timeout, and submission-hash idempotency.
+- A gateway receipt must echo the exact evidence and submission hashes before TRISHUL persists it;
+  a valid-looking receipt for different hashes is rejected.
+- Gateway responses are streamed through a 64 KiB hard cap instead of being buffered before their
+  size is checked.
 
 ## Idempotency and immutability
 

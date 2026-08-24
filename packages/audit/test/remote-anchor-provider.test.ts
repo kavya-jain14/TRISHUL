@@ -12,12 +12,17 @@ const receipt = {
   anchorReference: 'block:1042/tx:7',
   transactionHash: 'a'.repeat(64),
 };
+const boundReceipt = {
+  ...receipt,
+  evidenceHash: input.evidenceHash,
+  submissionHash: input.submissionHash,
+};
 
 describe('RemoteEvidenceAnchorProvider', () => {
   it('submits only hashes and returns a validated transaction receipt', async () => {
     const request = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(new Response(JSON.stringify(receipt), { status: 201 }));
+      .mockResolvedValue(new Response(JSON.stringify(boundReceipt), { status: 201 }));
     const provider = new RemoteEvidenceAnchorProvider({
       gatewayUrl: 'https://ledger.example.test/root/',
       bearerToken: 'gateway-secret',
@@ -51,6 +56,8 @@ describe('RemoteEvidenceAnchorProvider', () => {
           verified: true,
           anchorReference: receipt.anchorReference,
           transactionHash: receipt.transactionHash,
+          evidenceHash: input.evidenceHash,
+          submissionHash: input.submissionHash,
         }),
         { status: 200 },
       ),
@@ -68,11 +75,32 @@ describe('RemoteEvidenceAnchorProvider', () => {
           verified: true,
           anchorReference: 'block:other/tx:1',
           transactionHash: receipt.transactionHash,
+          evidenceHash: input.evidenceHash,
+          submissionHash: input.submissionHash,
         }),
         { status: 200 },
       ),
     );
     await expect(provider.verify({ ...input, ...receipt })).resolves.toBe(false);
+  });
+
+  it('rejects a valid-looking receipt that is bound to different hashes', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ...boundReceipt,
+          submissionHash: 'b'.repeat(64),
+        }),
+        { status: 201 },
+      ),
+    );
+    const provider = new RemoteEvidenceAnchorProvider({
+      gatewayUrl: 'https://ledger.example.test/',
+      bearerToken: 'gateway-secret',
+      request,
+    });
+
+    await expect(provider.anchor(input)).rejects.toThrow(/bound to different hashes/);
   });
 
   it('requires secure configuration and never includes gateway bodies in errors', async () => {
@@ -120,5 +148,26 @@ describe('RemoteEvidenceAnchorProvider', () => {
 
     await expect(provider.anchor(input)).rejects.toThrow(/transactionHash/);
     await expect(provider.anchor(input)).rejects.toThrow(/size limit/);
+  });
+
+  it('stops reading a streamed response as soon as the hard byte cap is crossed', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(40_000));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(body, { status: 200 }));
+    const provider = new RemoteEvidenceAnchorProvider({
+      gatewayUrl: 'https://ledger.example.test/',
+      bearerToken: 'gateway-secret',
+      request,
+    });
+
+    await expect(provider.anchor(input)).rejects.toThrow(/size limit/);
+    expect(cancelled).toBe(true);
   });
 });

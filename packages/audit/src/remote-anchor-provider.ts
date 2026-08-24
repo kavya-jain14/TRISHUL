@@ -19,6 +19,11 @@ interface RemoteReceipt {
   transactionHash: string;
 }
 
+interface RemoteBoundReceipt extends RemoteReceipt {
+  evidenceHash: string;
+  submissionHash: string;
+}
+
 /**
  * Production adapter for an authorised blockchain/consortium-ledger gateway.
  * Only hashes and receipt identifiers cross this boundary; evidence and case data never do.
@@ -52,7 +57,19 @@ export class RemoteEvidenceAnchorProvider implements EvidenceAnchorProvider {
       requestedAt: input.anchoredAt,
     };
     const response = await this.call('v1/evidence-anchors', payload, input.submissionHash);
-    return parseReceipt(response);
+    const receipt = parseReceipt(response);
+    if (
+      receipt.evidenceHash !== input.evidenceHash ||
+      receipt.submissionHash !== input.submissionHash
+    ) {
+      throw new Error('Evidence-anchor gateway returned a receipt bound to different hashes.');
+    }
+    return {
+      provider: receipt.provider,
+      network: receipt.network,
+      anchorReference: receipt.anchorReference,
+      transactionHash: receipt.transactionHash,
+    };
   }
 
   async verify(input: {
@@ -75,7 +92,9 @@ export class RemoteEvidenceAnchorProvider implements EvidenceAnchorProvider {
     if (response.verified !== true) return false;
     return (
       response.anchorReference === input.anchorReference &&
-      response.transactionHash === input.transactionHash
+      response.transactionHash === input.transactionHash &&
+      response.evidenceHash === input.evidenceHash &&
+      response.submissionHash === input.submissionHash
     );
   }
 
@@ -98,10 +117,7 @@ export class RemoteEvidenceAnchorProvider implements EvidenceAnchorProvider {
       if (!response.ok) {
         throw new Error(`Evidence-anchor gateway request failed with HTTP ${response.status}.`);
       }
-      const text = await response.text();
-      if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) {
-        throw new Error('Evidence-anchor gateway response exceeded the size limit.');
-      }
+      const text = await boundedResponseText(response);
       try {
         return JSON.parse(text) as unknown;
       } catch {
@@ -118,15 +134,52 @@ export class RemoteEvidenceAnchorProvider implements EvidenceAnchorProvider {
   }
 }
 
-function parseReceipt(value: unknown): RemoteReceipt {
+function parseReceipt(value: unknown): RemoteBoundReceipt {
   if (!isRecord(value)) throw new Error('Evidence-anchor gateway returned an invalid receipt.');
   const receipt = {
     provider: boundedText(value.provider, 'provider'),
     network: boundedText(value.network, 'network'),
     anchorReference: identifier(value.anchorReference, 'anchorReference'),
     transactionHash: digest(value.transactionHash, 'transactionHash'),
+    evidenceHash: digest(value.evidenceHash, 'evidenceHash'),
+    submissionHash: digest(value.submissionHash, 'submissionHash'),
   };
   return receipt;
+}
+
+async function boundedResponseText(response: Response): Promise<string> {
+  const declaredLength = response.headers.get('content-length');
+  if (declaredLength !== null) {
+    const parsedLength = Number(declaredLength);
+    if (Number.isFinite(parsedLength) && parsedLength > MAX_RESPONSE_BYTES) {
+      try {
+        await response.body?.cancel();
+      } catch {
+        // The declared size violation is authoritative even if cancellation fails.
+      }
+      throw new Error('Evidence-anchor gateway response exceeded the size limit.');
+    }
+  }
+  if (!response.body) return '';
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > MAX_RESPONSE_BYTES) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The size-limit error is authoritative even if the upstream cannot be cancelled cleanly.
+      }
+      throw new Error('Evidence-anchor gateway response exceeded the size limit.');
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8');
 }
 
 function normaliseGatewayUrl(raw: string, allowInsecureHttp: boolean): URL {
