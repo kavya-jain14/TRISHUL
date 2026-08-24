@@ -1,5 +1,4 @@
 import { Pool } from 'pg';
-import { DevelopmentHashchainProvider } from '@trishul/audit';
 import { buildApp } from './app.js';
 import { InMemoryCaseRepository } from './modules/cases/case-repository.js';
 import { CaseService } from './modules/cases/case-service.js';
@@ -7,6 +6,7 @@ import { PostgresCaseRepository } from './modules/cases/postgres-case-repository
 import { InMemoryEvidenceAnchorRepository } from './modules/evidence-anchors/anchor-repository.js';
 import { EvidenceAnchorService } from './modules/evidence-anchors/anchor-service.js';
 import { PostgresEvidenceAnchorRepository } from './modules/evidence-anchors/postgres-anchor-repository.js';
+import { evidenceAnchorProviderFromEnvironment } from './modules/evidence-anchors/provider.js';
 
 const port = Number.parseInt(process.env.API_PORT ?? '4000', 10);
 const host = process.env.API_HOST ?? '0.0.0.0';
@@ -23,7 +23,7 @@ const app = buildApp({
   caseService,
   evidenceAnchorService: new EvidenceAnchorService(
     anchorRepository,
-    new DevelopmentHashchainProvider(),
+    evidenceAnchorProviderFromEnvironment(),
     (caseId) => caseService.getCase(caseId),
   ),
   persistenceMode: pool ? 'POSTGRESQL' : 'IN_MEMORY_DEVELOPMENT_ADAPTER',
