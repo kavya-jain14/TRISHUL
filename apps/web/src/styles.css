@@ -625,10 +625,26 @@ h1 {
   gap: 6px;
 }
 
-.node-inventory > div span {
+.node-inventory > div button {
   padding: 6px 8px;
+  color: var(--ink);
   border: 1px solid var(--line);
+  background: transparent;
   font-size: 10px;
+  cursor: pointer;
+}
+
+.node-inventory > div button:hover,
+.node-inventory > div button.selected {
+  color: white;
+  border-color: var(--forest);
+  background: var(--forest);
+}
+
+.node-inventory > div button:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.65;
 }
 
 .provenance-panel dl {
@@ -657,6 +673,200 @@ h1 {
   margin-top: 18px;
   color: var(--muted);
   line-height: 1.5;
+}
+
+.intelligence-layout {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(310px, 0.65fr);
+  gap: 18px;
+}
+
+.exposure-panel,
+.risk-panel {
+  padding: 24px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.exposure-panel h3,
+.risk-panel h3 {
+  margin: 7px 0 0;
+  font-size: 18px;
+}
+
+.panel-note,
+.confirmation-boundary,
+.risk-empty p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.panel-note {
+  max-width: 660px;
+  margin: 16px 0 0;
+}
+
+.exposure-list {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.exposure-list button {
+  width: 100%;
+  padding: 13px 9px;
+  color: var(--ink);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(130px, 0.75fr) minmax(210px, 1fr);
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.exposure-list button:hover,
+.exposure-list button.selected {
+  background: #e7ece8;
+}
+
+.exposure-list button.selected {
+  box-shadow: inset 3px 0 0 var(--forest);
+}
+
+.exposure-list span,
+.exposure-list small,
+.exposure-list strong {
+  display: block;
+}
+
+.exposure-list small {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.exposure-list strong {
+  font-size: 12px;
+}
+
+.selected-range {
+  margin-top: 18px;
+  padding: 14px;
+  border-left: 3px solid var(--signal);
+  background: var(--panel);
+}
+
+.selected-range span,
+.selected-range strong {
+  display: block;
+}
+
+.selected-range span {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.selected-range strong {
+  margin-top: 7px;
+  font-size: 15px;
+}
+
+.risk-state {
+  margin-top: 16px;
+  padding: 12px 14px;
+  color: white;
+  background: #65706b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.risk-state.normal {
+  background: #2f7962;
+}
+
+.risk-state.anomalous,
+.risk-state.watch {
+  color: #2e250f;
+  background: #d7b862;
+}
+
+.risk-state.suspected_mule,
+.risk-state.confirmed {
+  background: #9a4e3f;
+}
+
+.risk-state span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.confirmation-boundary {
+  margin: 12px 0 0;
+}
+
+.risk-features {
+  margin: 18px 0 0;
+}
+
+.risk-features div {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.risk-features dt {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.risk-features dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.reason-codes {
+  margin-top: 15px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reason-codes span {
+  padding: 6px 7px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.risk-empty {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px dashed var(--line);
+}
+
+.risk-empty strong {
+  font-size: 12px;
+}
+
+.risk-empty p {
+  margin: 7px 0 0;
 }
 
 @keyframes breathe {
@@ -723,6 +933,10 @@ h1 {
   .graph-layout {
     grid-template-columns: 1fr;
   }
+
+  .intelligence-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 620px) {
@@ -758,6 +972,10 @@ h1 {
   .coverage-boundary {
     grid-template-columns: 1fr;
     gap: 7px;
+  }
+
+  .exposure-list button {
+    grid-template-columns: 1fr;
   }
 
   .edge-row {

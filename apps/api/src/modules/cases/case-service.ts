@@ -1,8 +1,12 @@
 import { hashEvidence } from '@trishul/audit';
 import {
   CaseDetailSchema,
+  AccountRiskRequestSchema,
   ComplaintSubmissionSchema,
+  ExposureRecomputeRequestSchema,
+  ExposureSnapshotSchema,
   IdempotencyKeySchema,
+  MuleAssessmentSnapshotSchema,
   ProviderEventBatchSchema,
   ProviderEventIngestResultSchema,
   ResolveTransactionRequestSchema,
@@ -10,12 +14,15 @@ import {
   assertCaseTransition,
   type CaseDetail,
   type ComplaintSubmission,
+  type ExposureSnapshot,
   type GraphSnapshot,
+  type MuleAssessmentSnapshot,
   type ProviderEvent,
   type ProviderEventIngestResult,
   type TraceRunResult,
 } from '@trishul/contracts';
-import { buildTraceGraph } from '@trishul/graph';
+import { buildTraceGraph, calculateGraphExposure } from '@trishul/graph';
+import { assessMuleRisk, deriveMuleRiskFeatures } from '@trishul/intelligence';
 import { ConflictError, InvalidRequestError, NotFoundError } from '../../domain/errors.js';
 import type { CaseRecord, CaseRepository, IdempotencyRecord } from './case-repository.js';
 
@@ -77,6 +84,8 @@ export class CaseService {
       providerEventHashes: {},
       processedEventIds: [],
       graphVersions: [],
+      exposureSnapshots: [],
+      muleAssessments: [],
     };
     await this.repository.saveCase(record);
     const detail = this.toDetail(record);
@@ -231,6 +240,12 @@ export class CaseService {
     if (record.summary.state === 'ACTIVE') {
       assertCaseTransition('ACTIVE', 'TRACE');
       record.summary.state = 'TRACE';
+    } else if (
+      trace.changed &&
+      (record.summary.state === 'EXPOSURE' || record.summary.state === 'RISK_ASSESSED')
+    ) {
+      assertCaseTransition(record.summary.state, 'TRACE');
+      record.summary.state = 'TRACE';
     }
     await this.repository.saveCase(record);
 
@@ -260,6 +275,237 @@ export class CaseService {
   async getLedger(caseId: string): Promise<ProviderEvent[]> {
     const record = await this.requireCase(caseId);
     return structuredClone(record.providerEvents);
+  }
+
+  async recomputeExposure(
+    caseId: string,
+    rawPayload: unknown,
+    rawIdempotencyKey: unknown,
+  ): Promise<ReplayResult<ExposureSnapshot>> {
+    const payload = ExposureRecomputeRequestSchema.parse(rawPayload);
+    const idempotencyKey = IdempotencyKeySchema.parse(rawIdempotencyKey);
+    const record = await this.requireCase(caseId);
+    const graph = record.graphVersions.at(-1);
+    if (!graph) {
+      throw new ConflictError('GRAPH_NOT_AVAILABLE', 'Run TRACE before calculating exposure');
+    }
+
+    const operation = `case:${caseId}:exposure`;
+    const calculationInputHash = hashEvidence({ graphVersion: graph.graphVersion, ...payload });
+    const replay = await this.readReplay<ExposureSnapshot>(
+      operation,
+      idempotencyKey,
+      calculationInputHash,
+    );
+    if (replay) return { value: ExposureSnapshotSchema.parse(replay), replayed: true };
+
+    const accountBalances = new Map<string, number>();
+    for (const balance of payload.accountBalances) {
+      if (accountBalances.has(balance.accountId)) {
+        throw new InvalidRequestError(
+          'DUPLICATE_ACCOUNT_BALANCE',
+          `Balance evidence for ${balance.accountId} was supplied more than once`,
+        );
+      }
+      accountBalances.set(balance.accountId, balance.knownCleanBalanceMinor);
+    }
+
+    const existing = record.exposureSnapshots.find(
+      (snapshot) => snapshot.graphVersion === graph.graphVersion,
+    );
+    if (existing) {
+      if (existing.calculationInputHash !== calculationInputHash) {
+        throw new ConflictError(
+          'EXPOSURE_VERSION_IMMUTABLE',
+          'Exposure evidence changed for an already-calculated graph version; run TRACE with new evidence first',
+        );
+      }
+      await this.storeReplay(operation, idempotencyKey, calculationInputHash, existing);
+      return { value: existing, replayed: false };
+    }
+
+    let calculated;
+    try {
+      calculated = calculateGraphExposure({
+        edges: graph.edges.flatMap((edge) => {
+          if (
+            edge.type !== 'PAID_TO' &&
+            edge.type !== 'TRANSFERRED_TO' &&
+            edge.type !== 'WITHDREW_AT'
+          ) {
+            return [];
+          }
+          return [
+            {
+              edgeId: edge.edgeId,
+              fromNodeId: edge.fromNodeId,
+              toNodeId: edge.toNodeId,
+              type: edge.type,
+              occurredAt: edge.occurredAt,
+              ...(edge.amount ? { amount: edge.amount } : {}),
+            },
+          ];
+        }),
+        knownCleanBalancesMinor: Object.fromEntries(accountBalances),
+      });
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw new InvalidRequestError('EXPOSURE_EVIDENCE_INVALID', error.message);
+      }
+      throw error;
+    }
+
+    const calculatedAt = this.clock();
+    const snapshot = ExposureSnapshotSchema.parse({
+      snapshotId: `exposure:${calculationInputHash.slice(0, 24)}`,
+      caseId,
+      graphVersion: graph.graphVersion,
+      calculationInputHash,
+      calculatedAt,
+      states: calculated.map((state) => ({
+        exposureStateId: `exposure-state:${hashEvidence({ caseId, graphVersion: graph.graphVersion, accountId: state.accountId }).slice(0, 20)}`,
+        caseId,
+        graphVersion: graph.graphVersion,
+        calculationInputHash,
+        calculatedAt,
+        balanceProvenance: payload.accountBalances.find(
+          (balance) => balance.accountId === state.accountId,
+        )?.provenance,
+        ...state,
+      })),
+    });
+
+    record.exposureSnapshots.push(snapshot);
+    if (record.summary.state === 'TRACE') {
+      assertCaseTransition('TRACE', 'EXPOSURE');
+      record.summary.state = 'EXPOSURE';
+    }
+    record.summary.updatedAt = calculatedAt;
+    await this.repository.saveCase(record);
+    await this.storeReplay(operation, idempotencyKey, calculationInputHash, snapshot);
+    return { value: snapshot, replayed: false };
+  }
+
+  async getLatestExposure(caseId: string): Promise<ExposureSnapshot> {
+    const record = await this.requireCase(caseId);
+    const currentGraphVersion = record.summary.graphVersion;
+    const exposure = record.exposureSnapshots.find(
+      (snapshot) => snapshot.graphVersion === currentGraphVersion,
+    );
+    if (!exposure) {
+      throw new ConflictError(
+        'EXPOSURE_NOT_AVAILABLE',
+        'Calculate exposure for the latest TRACE graph before requesting it',
+      );
+    }
+    return exposure;
+  }
+
+  async assessAccountRisk(
+    accountId: string,
+    rawPayload: unknown,
+    rawIdempotencyKey: unknown,
+  ): Promise<ReplayResult<MuleAssessmentSnapshot>> {
+    const payload = AccountRiskRequestSchema.parse(rawPayload);
+    const idempotencyKey = IdempotencyKeySchema.parse(rawIdempotencyKey);
+    const record = await this.requireCase(payload.caseId);
+    const graph = record.graphVersions.at(-1);
+    if (!graph) {
+      throw new ConflictError('GRAPH_NOT_AVAILABLE', 'Run TRACE before assessing account risk');
+    }
+    const currentExposure = record.exposureSnapshots.find(
+      (snapshot) => snapshot.graphVersion === graph.graphVersion,
+    );
+    if (!currentExposure) {
+      throw new ConflictError(
+        'EXPOSURE_NOT_AVAILABLE',
+        'Calculate exposure for the latest graph before assessing account risk',
+      );
+    }
+    if (!currentExposure.states.some((state) => state.accountId === accountId)) {
+      throw new InvalidRequestError(
+        'ACCOUNT_NOT_FRAUD_REACHABLE',
+        `Account ${accountId} has no exposure state in graph version ${graph.graphVersion}`,
+      );
+    }
+
+    const operation = `case:${payload.caseId}:account:${accountId}:risk`;
+    const calculationInputHash = hashEvidence({
+      graphVersion: graph.graphVersion,
+      accountId,
+      providerSignals: payload.providerSignals,
+      trustedOutcome: payload.trustedOutcome,
+    });
+    const replay = await this.readReplay<MuleAssessmentSnapshot>(
+      operation,
+      idempotencyKey,
+      calculationInputHash,
+    );
+    if (replay) return { value: MuleAssessmentSnapshotSchema.parse(replay), replayed: true };
+
+    const existing = record.muleAssessments.find(
+      (assessment) =>
+        assessment.graphVersion === graph.graphVersion && assessment.accountId === accountId,
+    );
+    if (existing) {
+      if (existing.calculationInputHash !== calculationInputHash) {
+        throw new ConflictError(
+          'RISK_VERSION_IMMUTABLE',
+          'Risk evidence changed for an already-assessed account and graph version',
+        );
+      }
+      await this.storeReplay(operation, idempotencyKey, calculationInputHash, existing);
+      return { value: existing, replayed: false };
+    }
+
+    let features;
+    try {
+      features = deriveMuleRiskFeatures(graph, accountId, payload.providerSignals);
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw new InvalidRequestError('RISK_EVIDENCE_INVALID', error.message);
+      }
+      throw error;
+    }
+    const result = assessMuleRisk({
+      ...features,
+      trustedOutcome: payload.trustedOutcome.status,
+    });
+    const assessedAt = this.clock();
+    const assessment = MuleAssessmentSnapshotSchema.parse({
+      assessmentId: `mule-assessment:${calculationInputHash.slice(0, 20)}`,
+      caseId: payload.caseId,
+      accountId,
+      graphVersion: graph.graphVersion,
+      state: result.state,
+      score: result.score,
+      reasonCodes: result.reasonCodes,
+      features,
+      featureVersion: 'mule-features-v1',
+      ruleVersion: result.ruleVersion,
+      calculationInputHash,
+      signalProvenance: payload.providerSignals.provenance,
+      trustedOutcome: payload.trustedOutcome,
+      assessedAt,
+    });
+
+    record.muleAssessments.push(assessment);
+    if (record.summary.state === 'EXPOSURE') {
+      assertCaseTransition('EXPOSURE', 'RISK_ASSESSED');
+      record.summary.state = 'RISK_ASSESSED';
+    }
+    record.summary.updatedAt = assessedAt;
+    await this.repository.saveCase(record);
+    await this.storeReplay(operation, idempotencyKey, calculationInputHash, assessment);
+    return { value: assessment, replayed: false };
+  }
+
+  async getRiskSnapshots(caseId: string): Promise<MuleAssessmentSnapshot[]> {
+    const record = await this.requireCase(caseId);
+    return structuredClone(record.muleAssessments).sort(
+      (left, right) =>
+        left.graphVersion - right.graphVersion || left.accountId.localeCompare(right.accountId),
+    );
   }
 
   private addProviderEvent(record: CaseRecord, event: ProviderEvent): boolean {
@@ -292,6 +538,8 @@ export class CaseService {
       providerEventCount: record.providerEvents.length,
       processedEventCount: record.processedEventIds.length,
       latestCoverageBoundary: record.graphVersions.at(-1)?.coverageBoundary ?? null,
+      latestExposureGraphVersion: record.exposureSnapshots.at(-1)?.graphVersion ?? null,
+      riskAssessmentCount: record.muleAssessments.length,
     });
   }
 

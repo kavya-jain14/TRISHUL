@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { CaseDetail, GraphEdge, GraphSnapshot } from '@trishul/contracts';
+import type {
+  AccountExposureState,
+  CaseDetail,
+  GraphEdge,
+  GraphSnapshot,
+  MuleAssessmentSnapshot,
+} from '@trishul/contracts';
 import { ApiError, loadCaseIntelligence, runGoldenTraceDemo } from './lib/api';
 
 type ApiState = 'checking' | 'ready' | 'unavailable';
@@ -41,14 +47,31 @@ function CaseIntelligence({ apiBase }: { apiBase: string }) {
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   const [graph, setGraph] = useState<GraphSnapshot | null>(null);
   const [graphPending, setGraphPending] = useState(false);
+  const [exposureStates, setExposureStates] = useState<AccountExposureState[]>([]);
+  const [exposurePending, setExposurePending] = useState(false);
+  const [riskAssessments, setRiskAssessments] = useState<MuleAssessmentSnapshot[]>([]);
   const [loadState, setLoadState] = useState<LoadState>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [demoProgress, setDemoProgress] = useState('');
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
   const selectedEdge = useMemo(
     () => graph?.edges.find((edge) => edge.edgeId === selectedEdgeId) ?? null,
     [graph, selectedEdgeId],
+  );
+  const selectedExposure = useMemo(
+    () => exposureStates.find((state) => state.accountId === selectedAccountId) ?? null,
+    [exposureStates, selectedAccountId],
+  );
+  const selectedRisk = useMemo(
+    () =>
+      riskAssessments.find(
+        (assessment) =>
+          assessment.accountId === selectedAccountId &&
+          assessment.graphVersion === caseDetail?.summary.graphVersion,
+      ) ?? null,
+    [caseDetail?.summary.graphVersion, riskAssessments, selectedAccountId],
   );
 
   const load = async (targetCaseId = caseId) => {
@@ -59,12 +82,23 @@ function CaseIntelligence({ apiBase }: { apiBase: string }) {
       setCaseDetail(result.caseDetail);
       setGraph(result.graph);
       setGraphPending(result.graphPending);
+      setExposureStates(result.exposure?.states ?? []);
+      setExposurePending(result.exposurePending);
+      setRiskAssessments(result.riskAssessments);
       setSelectedEdgeId(result.graph?.edges[0]?.edgeId ?? null);
+      setSelectedAccountId(
+        result.exposure?.states[0]?.accountId ??
+          result.graph?.nodes.find((node) => node.type === 'ACCOUNT')?.nodeId ??
+          null,
+      );
       setLoadState('ready');
     } catch (error) {
       setCaseDetail(null);
       setGraph(null);
       setGraphPending(false);
+      setExposureStates([]);
+      setExposurePending(false);
+      setRiskAssessments([]);
       setLoadState('error');
       setErrorMessage(
         error instanceof ApiError ? `${error.code}: ${error.message}` : 'Case could not be loaded.',
@@ -160,9 +194,9 @@ function CaseIntelligence({ apiBase }: { apiBase: string }) {
               <strong>{caseDetail.resolvedBeneficiaryAccount ?? 'Awaiting resolution'}</strong>
             </article>
             <article>
-              <span>Ledger / processed</span>
+              <span>Ledger / risk snapshots</span>
               <strong>
-                {caseDetail.providerEventCount} / {caseDetail.processedEventCount}
+                {caseDetail.providerEventCount} / {caseDetail.riskAssessmentCount}
               </strong>
             </article>
           </div>
@@ -215,10 +249,18 @@ function CaseIntelligence({ apiBase }: { apiBase: string }) {
                     ))}
                   </div>
                   <div className="node-inventory">
-                    <span>Observed nodes</span>
+                    <span>Observed nodes - select an account for intelligence</span>
                     <div>
                       {graph.nodes.map((node) => (
-                        <span key={node.nodeId}>{node.label}</span>
+                        <button
+                          className={node.nodeId === selectedAccountId ? 'selected' : ''}
+                          disabled={node.type !== 'ACCOUNT'}
+                          key={node.nodeId}
+                          onClick={() => setSelectedAccountId(node.nodeId)}
+                          type="button"
+                        >
+                          {node.label}
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -226,11 +268,156 @@ function CaseIntelligence({ apiBase }: { apiBase: string }) {
 
                 <ProvenancePanel edge={selectedEdge} />
               </div>
+
+              {exposurePending && (
+                <div className="intentional-state pending-state">
+                  <strong>Exposure has not been calculated for graph v{graph.graphVersion}</strong>
+                  <p>
+                    Known-clean balance evidence is required. The UI will not turn observed outgoing
+                    value into an exact fraud amount.
+                  </p>
+                </div>
+              )}
+
+              {exposureStates.length > 0 && (
+                <div className="intelligence-layout">
+                  <ExposurePanel
+                    onSelect={setSelectedAccountId}
+                    selectedAccountId={selectedAccountId}
+                    states={exposureStates}
+                  />
+                  <RiskPanel
+                    assessment={selectedRisk}
+                    exposure={selectedExposure}
+                    selectedAccountId={selectedAccountId}
+                  />
+                </div>
+              )}
             </>
           )}
         </>
       )}
     </section>
+  );
+}
+
+function ExposurePanel({
+  states,
+  selectedAccountId,
+  onSelect,
+}: {
+  states: AccountExposureState[];
+  selectedAccountId: string | null;
+  onSelect: (accountId: string) => void;
+}) {
+  return (
+    <article className="exposure-panel">
+      <div className="card-heading">
+        <div>
+          <span className="section-label">Commingled-funds accounting</span>
+          <h3>Attributable exposure ranges</h3>
+        </div>
+        <span className="version-badge">{states[0]?.methodVersion}</span>
+      </div>
+      <p className="panel-note">
+        Observed movement is factual. The range states what may be attributable after known-clean
+        funds are considered.
+      </p>
+      <div className="exposure-list">
+        {states.map((state) => (
+          <button
+            aria-pressed={state.accountId === selectedAccountId}
+            className={state.accountId === selectedAccountId ? 'selected' : ''}
+            key={state.exposureStateId}
+            onClick={() => onSelect(state.accountId)}
+            type="button"
+          >
+            <span>
+              <strong>{state.accountId}</strong>
+              <small>graph v{state.graphVersion}</small>
+            </span>
+            <span>
+              <small>Observed outgoing</small>
+              <strong>{formatMoney(state.observedOutgoingMinor)}</strong>
+            </span>
+            <span>
+              <small>Attributable range</small>
+              <strong>
+                {formatMoney(state.minimumAttributableMinor)} to{' '}
+                {formatMoney(state.maximumAttributableMinor)}
+              </strong>
+            </span>
+          </button>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function RiskPanel({
+  assessment,
+  exposure,
+  selectedAccountId,
+}: {
+  assessment: MuleAssessmentSnapshot | null;
+  exposure: AccountExposureState | null;
+  selectedAccountId: string | null;
+}) {
+  return (
+    <article className="risk-panel">
+      <span className="section-label">Explainable mule / network risk</span>
+      <h3>{selectedAccountId ?? 'Select an account'}</h3>
+      {exposure && (
+        <div className="selected-range">
+          <span>Defensible attributable range</span>
+          <strong>
+            {formatMoney(exposure.minimumAttributableMinor)} to{' '}
+            {formatMoney(exposure.maximumAttributableMinor)}
+          </strong>
+        </div>
+      )}
+      {assessment ? (
+        <>
+          <div className={`risk-state ${assessment.state.toLowerCase()}`}>
+            <span>{assessment.state.replaceAll('_', ' ')}</span>
+            <strong>{assessment.score}/100</strong>
+          </div>
+          <p className="confirmation-boundary">
+            {assessment.state === 'CONFIRMED' && assessment.trustedOutcome.status === 'CONFIRMED'
+              ? `Confirmed only by trusted outcome ${assessment.trustedOutcome.institutionalReference}.`
+              : 'This is an explainable recommendation, not a confirmed mule finding.'}
+          </p>
+          <dl className="risk-features">
+            <div>
+              <dt>Pass-through</dt>
+              <dd>{Math.round(assessment.features.behaviour.passThrough * 100)}%</dd>
+            </div>
+            <div>
+              <dt>Network proximity</dt>
+              <dd>{Math.round(assessment.features.network.reportedNetworkProximity * 100)}%</dd>
+            </div>
+            <div>
+              <dt>Rapid forwarding</dt>
+              <dd>{Math.round(assessment.features.movement.rapidForwarding * 100)}%</dd>
+            </div>
+            <div>
+              <dt>Signal source</dt>
+              <dd>{assessment.signalProvenance.sourceName}</dd>
+            </div>
+          </dl>
+          <div className="reason-codes">
+            {assessment.reasonCodes.map((reason) => (
+              <span key={reason}>{reason.replaceAll('_', ' ')}</span>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="risk-empty">
+          <strong>No current risk assessment for this account</strong>
+          <p>One complaint or one rapid transfer is never promoted to a mule verdict.</p>
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -279,10 +466,11 @@ function CommandCenter({ manifest }: { manifest: SystemManifest | null }) {
       <section className="intro-panel">
         <div>
           <span className="section-label">Current checkpoint</span>
-          <h2>Complaint-to-trace intelligence is wired.</h2>
+          <h2>Trace, exposure, and account risk are wired.</h2>
           <p>
             Provider events are accepted through strict contracts, replayed safely, ordered by
-            financial time, and converted into a versioned graph only when provenance exists.
+            financial time, converted into a versioned graph, and evaluated as ranges and
+            explainable multi-signal risk only when evidence exists.
           </p>
         </div>
         <div className="phase-stamp">
@@ -305,7 +493,7 @@ function CommandCenter({ manifest }: { manifest: SystemManifest | null }) {
           <div className="card-heading">
             <div>
               <span className="section-label">Live vertical slice</span>
-              <h3>Complaint to TRACE</h3>
+              <h3>Complaint to account intelligence</h3>
             </div>
             <span className="priority">P0</span>
           </div>
@@ -314,6 +502,7 @@ function CommandCenter({ manifest }: { manifest: SystemManifest | null }) {
             <li>Provider resolution anchors the beneficiary account</li>
             <li>Financial events enter a conflict-safe chronological ledger</li>
             <li>TRACE returns a versioned graph and explicit visibility boundary</li>
+            <li>Exposure and risk stay versioned, explainable, and provenance-backed</li>
           </ol>
         </article>
 
@@ -340,6 +529,10 @@ function CommandCenter({ manifest }: { manifest: SystemManifest | null }) {
             <div>
               <dt>Replay</dt>
               <dd>Idempotent or rejected</dd>
+            </div>
+            <div>
+              <dt>Mule state</dt>
+              <dd>Confirmed only by trusted outcome</dd>
             </div>
           </dl>
         </article>

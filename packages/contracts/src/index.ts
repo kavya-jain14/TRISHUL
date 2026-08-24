@@ -1,5 +1,6 @@
 export * from './cases.js';
 export * from './common.js';
+export * from './exposure.js';
 export * from './forecast.js';
 export * from './graph.js';
 export * from './provider-events.js';

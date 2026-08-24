@@ -108,29 +108,45 @@ CREATE TABLE graph_edges (
 
 CREATE TABLE exposure_states (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  exposure_state_ref text NOT NULL UNIQUE,
+  snapshot_ref text NOT NULL,
   case_id uuid NOT NULL REFERENCES cases(id),
   graph_version integer NOT NULL CHECK (graph_version > 0),
   account_id uuid NOT NULL REFERENCES accounts(id),
   observed_outgoing_minor bigint NOT NULL CHECK (observed_outgoing_minor >= 0),
+  minimum_fraud_linked_balance_minor bigint NOT NULL CHECK (minimum_fraud_linked_balance_minor >= 0),
+  fraud_linked_balance_minor bigint NOT NULL CHECK (fraud_linked_balance_minor >= 0),
+  known_clean_balance_minor bigint NOT NULL CHECK (known_clean_balance_minor >= 0),
+  non_fraud_compatible_inflow_minor bigint NOT NULL CHECK (non_fraud_compatible_inflow_minor >= 0),
   minimum_attributable_minor bigint NOT NULL CHECK (minimum_attributable_minor >= 0),
   maximum_attributable_minor bigint NOT NULL CHECK (maximum_attributable_minor >= minimum_attributable_minor),
+  currency char(3) NOT NULL DEFAULT 'INR',
   method_version text NOT NULL,
+  calculation_input_hash char(64) NOT NULL,
+  balance_provenance jsonb NOT NULL CHECK (balance_provenance <> '{}'::jsonb),
   calculated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (minimum_fraud_linked_balance_minor <= fraud_linked_balance_minor),
+  CHECK (maximum_attributable_minor <= observed_outgoing_minor),
   UNIQUE (case_id, graph_version, account_id)
 );
 
 CREATE TABLE mule_assessments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  assessment_ref text NOT NULL UNIQUE,
   case_id uuid NOT NULL REFERENCES cases(id),
   account_id uuid NOT NULL REFERENCES accounts(id),
   graph_version integer NOT NULL CHECK (graph_version > 0),
   state text NOT NULL CHECK (state IN ('NORMAL', 'ANOMALOUS', 'WATCH', 'SUSPECTED_MULE', 'CONFIRMED')),
   score numeric(5,2) NOT NULL CHECK (score >= 0 AND score <= 100),
   reason_codes jsonb NOT NULL,
+  features jsonb NOT NULL,
   feature_version text NOT NULL,
   rule_version text NOT NULL,
-  trusted_outcome_reference text,
-  assessed_at timestamptz NOT NULL DEFAULT now()
+  calculation_input_hash char(64) NOT NULL,
+  signal_provenance jsonb NOT NULL CHECK (signal_provenance <> '{}'::jsonb),
+  trusted_outcome jsonb NOT NULL,
+  assessed_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (case_id, graph_version, account_id)
 );
 
 CREATE TABLE prediction_runs (

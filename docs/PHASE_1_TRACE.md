@@ -69,4 +69,4 @@ Expected Phase 1 graph:
 
 ## Next phase
 
-Fraud-attributable exposure snapshots plus behaviour/network-driven mule-risk states, wired to node drill-down without treating one complaint or one fast transfer as proof.
+Delivered in [Phase 2](PHASE_2_EXPOSURE_RISK.md): fraud-attributable exposure snapshots plus behaviour/network-driven mule-risk states, wired to node drill-down without treating one complaint or one fast transfer as proof.

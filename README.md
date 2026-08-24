@@ -78,7 +78,7 @@ docker compose up -d postgres redis
 6. PrivacyPass and lawful identity resolution
 7. Evidence anchors, command centre, and final QA
 
-See [docs/PHASE_1_TRACE.md](docs/PHASE_1_TRACE.md) for the current checkpoint.
+See [docs/PHASE_2_EXPOSURE_RISK.md](docs/PHASE_2_EXPOSURE_RISK.md) for the current checkpoint and [docs/PHASE_1_TRACE.md](docs/PHASE_1_TRACE.md) for the trace foundation it extends.
 
 ## Collaboration
 

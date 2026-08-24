@@ -57,6 +57,8 @@ describe('Case Intelligence API client', () => {
 
     expect(result.graph).toBeNull();
     expect(result.graphPending).toBe(true);
+    expect(result.exposure).toBeNull();
+    expect(result.exposurePending).toBe(true);
   });
 
   it('routes simulator events through backend resolution and ledger endpoints', async () => {
@@ -114,6 +116,8 @@ describe('Case Intelligence API client', () => {
       }),
       jsonResponse({ acceptedEventIds: ['evt-transfer'] }),
       jsonResponse({ graphVersion: 1 }),
+      jsonResponse({ exposure: {} }),
+      jsonResponse({ assessment: {} }),
     ];
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(responses.shift()));
     vi.stubGlobal('fetch', fetchMock);
@@ -125,7 +129,9 @@ describe('Case Intelligence API client', () => {
     expect(result).toBe('case:complaint-golden-a');
     expect(urls).toContain('/api/v1/cases/case%3Acomplaint-golden-a/resolve-transaction');
     expect(urls).toContain('/api/v1/cases/case%3Acomplaint-golden-a/provider-events');
-    expect(urls.at(-1)).toBe('/api/v1/cases/case%3Acomplaint-golden-a/trace');
-    expect(progress.at(-1)).toBe('Case Intelligence graph ready');
+    expect(urls).toContain('/api/v1/cases/case%3Acomplaint-golden-a/trace');
+    expect(urls).toContain('/api/v1/cases/case%3Acomplaint-golden-a/recompute-exposure');
+    expect(urls.at(-1)).toBe('/api/v1/accounts/acct-receiver-a/risk');
+    expect(progress.at(-1)).toBe('Exposure and risk intelligence ready');
   });
 });

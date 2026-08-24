@@ -16,8 +16,8 @@ flowchart TD
 
 | Application        | Responsibility                             | Current state                                            |
 | ------------------ | ------------------------------------------ | -------------------------------------------------------- |
-| `apps/web`         | Command centre and investigation workspace | Backend-driven Case Intelligence and demo orchestration  |
-| `apps/api`         | Validated, scoped HTTP boundary            | Complaint, resolver, provider ledger, TRACE, case, graph |
+| `apps/web`         | Command centre and investigation workspace | Graph, exposure, risk drill-down, and demo orchestration |
+| `apps/api`         | Validated, scoped HTTP boundary            | Complaint, ledger, TRACE, exposure, and account risk     |
 | `apps/worker`      | Trace/reforecast/alert job consumer        | Typed capability manifest                                |
 | `apps/psp-sandbox` | Replaceable deterministic provider adapter | Golden scenario sequencing/reset with shared contracts   |
 
@@ -37,6 +37,8 @@ flowchart TD
 
 The simulator emits the same `ProviderEvent` contract expected from a future authorised bank/FI adapter. It is deterministic, labelled `SIMULATED`, and resettable. The frontend consumes API state and never manufactures financial edges.
 
-## Phase 1 persistence
+## Phase 2 persistence
 
-`CaseService` depends on a repository port. Tests and lightweight local work can use the in-memory adapter. A configured API process uses `PostgresCaseRepository`, which persists cases, complaints, financial transactions, raw provider events, processed-event state, immutable graph snapshots, normalised graph nodes/edges, and idempotency results. The same golden flow is tested across a repository/service recreation to prove restart persistence.
+`CaseService` depends on a repository port. Tests and lightweight local work can use the in-memory adapter. A configured API process uses `PostgresCaseRepository`, which persists cases, complaints, financial transactions, raw provider events, processed-event state, immutable graph snapshots, normalised graph nodes/edges, versioned exposure states, explainable mule assessments, and idempotency results. The same flow is tested across a repository/service recreation to prove restart persistence.
+
+Exposure is recomputed only against the latest immutable graph. Risk requires a current exposure snapshot. A changed TRACE version invalidates current derived intelligence without deleting its history.

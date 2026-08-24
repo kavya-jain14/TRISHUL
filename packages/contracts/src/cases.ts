@@ -44,6 +44,8 @@ export const CaseDetailSchema = z
     providerEventCount: z.number().int().nonnegative(),
     processedEventCount: z.number().int().nonnegative(),
     latestCoverageBoundary: z.string().trim().min(1).max(240).nullable(),
+    latestExposureGraphVersion: z.number().int().positive().nullable().default(null),
+    riskAssessmentCount: z.number().int().nonnegative().default(0),
   })
   .strict();
 

@@ -2,8 +2,12 @@ import { hashEvidence } from '@trishul/audit';
 import {
   CaseSummarySchema,
   ComplaintSubmissionSchema,
+  ExposureSnapshotSchema,
   GraphSnapshotSchema,
+  MuleAssessmentSnapshotSchema,
   ProviderEventSchema,
+  type ExposureSnapshot,
+  type MuleAssessmentSnapshot,
   type ProviderEvent,
 } from '@trishul/contracts';
 import type { Pool, PoolClient } from 'pg';
@@ -109,6 +113,138 @@ export class PostgresCaseRepository implements CaseRepository {
     const graphVersions = graphResult.rows.map((graphRow) =>
       GraphSnapshotSchema.parse(jsonValue(graphRow.snapshot)),
     );
+    const exposureResult = await this.pool.query<{
+      exposure_state_ref: string;
+      snapshot_ref: string;
+      graph_version: number;
+      account_ref: string;
+      observed_outgoing_minor: string | number;
+      minimum_fraud_linked_balance_minor: string | number;
+      fraud_linked_balance_minor: string | number;
+      known_clean_balance_minor: string | number;
+      non_fraud_compatible_inflow_minor: string | number;
+      minimum_attributable_minor: string | number;
+      maximum_attributable_minor: string | number;
+      currency: 'INR';
+      method_version: string;
+      calculation_input_hash: string;
+      balance_provenance: unknown;
+      calculated_at: Date | string;
+    }>(
+      `SELECT
+         es.exposure_state_ref,
+         es.snapshot_ref,
+         es.graph_version,
+         a.provider_account_ref AS account_ref,
+         es.observed_outgoing_minor,
+         es.minimum_fraud_linked_balance_minor,
+         es.fraud_linked_balance_minor,
+         es.known_clean_balance_minor,
+         es.non_fraud_compatible_inflow_minor,
+         es.minimum_attributable_minor,
+         es.maximum_attributable_minor,
+         es.currency,
+         es.method_version,
+         es.calculation_input_hash,
+         es.balance_provenance,
+         es.calculated_at
+       FROM exposure_states es
+       JOIN accounts a ON a.id = es.account_id
+       WHERE es.case_id = $1
+       ORDER BY es.graph_version, a.provider_account_ref`,
+      [row.internal_case_id],
+    );
+    const exposureGroups = new Map<string, ExposureSnapshot>();
+    for (const exposureRow of exposureResult.rows) {
+      const key = `${exposureRow.snapshot_ref}:${exposureRow.graph_version}`;
+      const state = {
+        exposureStateId: exposureRow.exposure_state_ref,
+        caseId: row.external_case_id,
+        graphVersion: exposureRow.graph_version,
+        accountId: exposureRow.account_ref,
+        observedOutgoingMinor: Number(exposureRow.observed_outgoing_minor),
+        minimumFraudLinkedBalanceMinor: Number(exposureRow.minimum_fraud_linked_balance_minor),
+        fraudLinkedBalanceMinor: Number(exposureRow.fraud_linked_balance_minor),
+        knownCleanBalanceMinor: Number(exposureRow.known_clean_balance_minor),
+        nonFraudCompatibleInflowMinor: Number(exposureRow.non_fraud_compatible_inflow_minor),
+        minimumAttributableMinor: Number(exposureRow.minimum_attributable_minor),
+        maximumAttributableMinor: Number(exposureRow.maximum_attributable_minor),
+        currency: exposureRow.currency,
+        methodVersion: exposureRow.method_version,
+        calculationInputHash: exposureRow.calculation_input_hash,
+        balanceProvenance: jsonValue(exposureRow.balance_provenance),
+        calculatedAt: iso(exposureRow.calculated_at),
+      };
+      const existing = exposureGroups.get(key);
+      exposureGroups.set(
+        key,
+        ExposureSnapshotSchema.parse({
+          snapshotId: exposureRow.snapshot_ref,
+          caseId: row.external_case_id,
+          graphVersion: exposureRow.graph_version,
+          calculationInputHash: exposureRow.calculation_input_hash,
+          calculatedAt: iso(exposureRow.calculated_at),
+          states: [...(existing?.states ?? []), state],
+        }),
+      );
+    }
+    const exposureSnapshots = [...exposureGroups.values()].sort(
+      (left, right) => left.graphVersion - right.graphVersion,
+    );
+
+    const assessmentResult = await this.pool.query<{
+      assessment_ref: string;
+      graph_version: number;
+      account_ref: string;
+      state: string;
+      score: string | number;
+      reason_codes: unknown;
+      features: unknown;
+      feature_version: string;
+      rule_version: string;
+      calculation_input_hash: string;
+      signal_provenance: unknown;
+      trusted_outcome: unknown;
+      assessed_at: Date | string;
+    }>(
+      `SELECT
+         ma.assessment_ref,
+         ma.graph_version,
+         a.provider_account_ref AS account_ref,
+         ma.state,
+         ma.score,
+         ma.reason_codes,
+         ma.features,
+         ma.feature_version,
+         ma.rule_version,
+         ma.calculation_input_hash,
+         ma.signal_provenance,
+         ma.trusted_outcome,
+         ma.assessed_at
+       FROM mule_assessments ma
+       JOIN accounts a ON a.id = ma.account_id
+       WHERE ma.case_id = $1
+       ORDER BY ma.graph_version, a.provider_account_ref`,
+      [row.internal_case_id],
+    );
+    const muleAssessments = assessmentResult.rows.map((assessmentRow) =>
+      MuleAssessmentSnapshotSchema.parse({
+        assessmentId: assessmentRow.assessment_ref,
+        caseId: row.external_case_id,
+        accountId: assessmentRow.account_ref,
+        graphVersion: assessmentRow.graph_version,
+        state: assessmentRow.state,
+        score: Number(assessmentRow.score),
+        reasonCodes: jsonValue(assessmentRow.reason_codes),
+        features: jsonValue(assessmentRow.features),
+        featureVersion: assessmentRow.feature_version,
+        ruleVersion: assessmentRow.rule_version,
+        calculationInputHash: assessmentRow.calculation_input_hash,
+        signalProvenance: jsonValue(assessmentRow.signal_provenance),
+        trustedOutcome: jsonValue(assessmentRow.trusted_outcome),
+        assessedAt: iso(assessmentRow.assessed_at),
+      }),
+    );
     const resolution = providerEvents.find((event) => event.type === 'RESOLVE_TRANSACTION');
 
     return {
@@ -144,6 +280,8 @@ export class PostgresCaseRepository implements CaseRepository {
       ),
       processedEventIds,
       graphVersions,
+      exposureSnapshots,
+      muleAssessments,
     };
   }
 
@@ -326,6 +464,102 @@ export class PostgresCaseRepository implements CaseRepository {
               edge.occurredAt,
               JSON.stringify(edge.provenance),
             ],
+          );
+        }
+      }
+
+      for (const snapshot of record.exposureSnapshots) {
+        for (const state of snapshot.states) {
+          const stateAccountId = await accountId(
+            client,
+            state.balanceProvenance.sourceName,
+            state.accountId,
+          );
+          const result = await client.query<{ exposure_state_ref: string }>(
+            `INSERT INTO exposure_states (
+               exposure_state_ref, snapshot_ref, case_id, graph_version, account_id,
+               observed_outgoing_minor, minimum_fraud_linked_balance_minor,
+               fraud_linked_balance_minor, known_clean_balance_minor,
+               non_fraud_compatible_inflow_minor, minimum_attributable_minor,
+               maximum_attributable_minor, currency, method_version, calculation_input_hash,
+               balance_provenance, calculated_at
+             ) VALUES (
+               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+               $15, $16::jsonb, $17
+             )
+             ON CONFLICT (case_id, graph_version, account_id) DO UPDATE SET
+               calculated_at = exposure_states.calculated_at
+             WHERE exposure_states.calculation_input_hash = EXCLUDED.calculation_input_hash
+             RETURNING exposure_state_ref`,
+            [
+              state.exposureStateId,
+              snapshot.snapshotId,
+              internalCaseId,
+              state.graphVersion,
+              stateAccountId,
+              state.observedOutgoingMinor,
+              state.minimumFraudLinkedBalanceMinor,
+              state.fraudLinkedBalanceMinor,
+              state.knownCleanBalanceMinor,
+              state.nonFraudCompatibleInflowMinor,
+              state.minimumAttributableMinor,
+              state.maximumAttributableMinor,
+              state.currency,
+              state.methodVersion,
+              state.calculationInputHash,
+              JSON.stringify(state.balanceProvenance),
+              state.calculatedAt,
+            ],
+          );
+          if (result.rows.length === 0) {
+            throw new ConflictError(
+              'EXPOSURE_VERSION_IMMUTABLE',
+              `Exposure for ${state.accountId} and graph version ${state.graphVersion} already exists with different evidence`,
+            );
+          }
+        }
+      }
+
+      for (const assessment of record.muleAssessments) {
+        const assessmentAccountId = await accountId(
+          client,
+          assessment.signalProvenance.sourceName,
+          assessment.accountId,
+        );
+        const result = await client.query<{ assessment_ref: string }>(
+          `INSERT INTO mule_assessments (
+             assessment_ref, case_id, account_id, graph_version, state, score, reason_codes,
+             features, feature_version, rule_version, calculation_input_hash, signal_provenance,
+             trusted_outcome, assessed_at
+           ) VALUES (
+             $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11,
+             $12::jsonb, $13::jsonb, $14
+           )
+           ON CONFLICT (case_id, graph_version, account_id) DO UPDATE SET
+             assessed_at = mule_assessments.assessed_at
+           WHERE mule_assessments.calculation_input_hash = EXCLUDED.calculation_input_hash
+           RETURNING assessment_ref`,
+          [
+            assessment.assessmentId,
+            internalCaseId,
+            assessmentAccountId,
+            assessment.graphVersion,
+            assessment.state,
+            assessment.score,
+            JSON.stringify(assessment.reasonCodes),
+            JSON.stringify(assessment.features),
+            assessment.featureVersion,
+            assessment.ruleVersion,
+            assessment.calculationInputHash,
+            JSON.stringify(assessment.signalProvenance),
+            JSON.stringify(assessment.trustedOutcome),
+            assessment.assessedAt,
+          ],
+        );
+        if (result.rows.length === 0) {
+          throw new ConflictError(
+            'RISK_VERSION_IMMUTABLE',
+            `Risk for ${assessment.accountId} and graph version ${assessment.graphVersion} already exists with different evidence`,
           );
         }
       }

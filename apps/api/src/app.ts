@@ -32,7 +32,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   app.get('/api/v1/system/manifest', async () => ({
     product: 'TRISHUL',
-    phase: 'PHASE_1_TRACE_VERTICAL_SLICE',
+    phase: 'PHASE_2_EXPOSURE_RISK_VERTICAL_SLICE',
     persistenceMode: options.persistenceMode ?? 'IN_MEMORY_DEVELOPMENT_ADAPTER',
     doctrine: {
       intentInference: false,
@@ -48,6 +48,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       'EVIDENCE_GATE',
       'DETERMINISTIC_PSP_SANDBOX',
       'COMPLAINT_TO_TRACE_VERTICAL_SLICE',
+      'VERSIONED_ATTRIBUTABLE_EXPOSURE',
+      'EXPLAINABLE_ACCOUNT_RISK',
     ],
   }));
 

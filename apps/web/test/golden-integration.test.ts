@@ -38,7 +38,7 @@ describe('golden complaint-to-trace integration', () => {
       const intelligence = await loadCaseIntelligence(caseId);
 
       expect(caseId).toBe('case:complaint-golden-a');
-      expect(intelligence.caseDetail.summary.state).toBe('TRACE');
+      expect(intelligence.caseDetail.summary.state).toBe('RISK_ASSESSED');
       expect(intelligence.caseDetail.providerEventCount).toBe(8);
       expect(intelligence.caseDetail.processedEventCount).toBe(8);
       expect(intelligence.graphPending).toBe(false);
@@ -46,7 +46,11 @@ describe('golden complaint-to-trace integration', () => {
       expect(intelligence.graph?.edges).toHaveLength(6);
       expect(intelligence.graph?.edges.every((edge) => edge.provenance.sourceEventId)).toBe(true);
       expect(intelligence.graph?.coverageBoundary).toContain('cash-out');
-      expect(progress.at(-1)).toBe('Case Intelligence graph ready');
+      expect(intelligence.exposure?.graphVersion).toBe(1);
+      expect(intelligence.exposure?.states).toHaveLength(5);
+      expect(intelligence.riskAssessments).toHaveLength(1);
+      expect(intelligence.riskAssessments[0]?.state).not.toBe('CONFIRMED');
+      expect(progress.at(-1)).toBe('Exposure and risk intelligence ready');
     } finally {
       await Promise.all([api.close(), sandbox.close()]);
     }

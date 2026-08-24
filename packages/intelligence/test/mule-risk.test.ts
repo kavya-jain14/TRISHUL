@@ -3,7 +3,9 @@ import { assessMuleRisk, type MuleRiskInput } from '../src/index.js';
 
 const baseline: MuleRiskInput = {
   behaviour: {
-    volumeVelocity: 0,
+    inflowSpike: 0,
+    uniqueSenderSpike: 0,
+    firstTimeSenderRatio: 0,
     fanIn: 0,
     fanOut: 0,
     passThrough: 0,
@@ -35,7 +37,9 @@ describe('assessMuleRisk', () => {
     const result = assessMuleRisk({
       ...baseline,
       behaviour: {
-        volumeVelocity: 0.9,
+        inflowSpike: 0.9,
+        uniqueSenderSpike: 0.9,
+        firstTimeSenderRatio: 0.85,
         fanIn: 0.9,
         fanOut: 0.8,
         passThrough: 0.95,

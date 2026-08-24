@@ -1,5 +1,7 @@
 import {
+  AccountRiskRequestSchema,
   ComplaintSubmissionSchema,
+  ExposureRecomputeRequestSchema,
   IdentifierSchema,
   ProviderEventBatchSchema,
   ResolveTransactionRequestSchema,
@@ -67,4 +69,36 @@ export function registerCaseRoutes(app: FastifyInstance, service: CaseService): 
   app.get<{ Params: { caseId: string } }>('/api/v1/cases/:caseId/ledger', async (request) => ({
     events: await service.getLedger(caseId(request.params.caseId)),
   }));
+
+  app.post<{ Params: { caseId: string } }>(
+    '/api/v1/cases/:caseId/recompute-exposure',
+    async (request) => {
+      const id = caseId(request.params.caseId);
+      const payload = ExposureRecomputeRequestSchema.parse(request.body);
+      const result = await service.recomputeExposure(id, payload, idempotencyKey(request));
+      return { exposure: result.value, replayed: result.replayed };
+    },
+  );
+
+  app.get<{ Params: { caseId: string } }>('/api/v1/cases/:caseId/exposure', async (request) => ({
+    exposure: await service.getLatestExposure(caseId(request.params.caseId)),
+  }));
+
+  app.post<{ Params: { accountId: string } }>(
+    '/api/v1/accounts/:accountId/risk',
+    async (request) => {
+      const accountId = caseId(request.params.accountId);
+      const payload = AccountRiskRequestSchema.parse(request.body);
+      const result = await service.assessAccountRisk(accountId, payload, idempotencyKey(request));
+      return { assessment: result.value, replayed: result.replayed };
+    },
+  );
+
+  app.get<{ Params: { caseId: string } }>(
+    '/api/v1/cases/:caseId/risk-snapshots',
+    async (request) => ({
+      caseId: caseId(request.params.caseId),
+      assessments: await service.getRiskSnapshots(caseId(request.params.caseId)),
+    }),
+  );
 }

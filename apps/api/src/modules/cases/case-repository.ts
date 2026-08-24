@@ -1,7 +1,9 @@
 import type {
   CaseSummary,
   ComplaintSubmission,
+  ExposureSnapshot,
   GraphSnapshot,
+  MuleAssessmentSnapshot,
   ProviderEvent,
 } from '@trishul/contracts';
 
@@ -13,6 +15,8 @@ export interface CaseRecord {
   providerEventHashes: Record<string, string>;
   processedEventIds: string[];
   graphVersions: GraphSnapshot[];
+  exposureSnapshots: ExposureSnapshot[];
+  muleAssessments: MuleAssessmentSnapshot[];
 }
 
 export interface IdempotencyRecord {
