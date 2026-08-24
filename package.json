@@ -1,0 +1,15 @@
+{
+  "name": "trishul",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test --experimental-strip-types packages/ledger/src/ledger.test.ts packages/ledger/src/evidence-anchor.test.ts packages/worker/src/worker.test.ts apps/psp-sandbox/src/provider-simulator.test.ts",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm run test",
+    "demo:psp": "node --experimental-strip-types apps/psp-sandbox/src/demo.ts"
+  },
+  "dependencies": { "pg": "^8.16.3", "zod": "^4.1.12" },
+  "devDependencies": { "@types/node": "^24.0.0", "@types/pg": "^8.15.5", "typescript": "^5.9.2" }
+}
