@@ -9,6 +9,7 @@ import { CaseActionService } from './modules/case-actions/service.js';
 import { InMemoryEvidenceAnchorRepository } from './modules/evidence-anchors/anchor-repository.js';
 import { EvidenceAnchorService } from './modules/evidence-anchors/anchor-service.js';
 import { PostgresEvidenceAnchorRepository } from './modules/evidence-anchors/postgres-anchor-repository.js';
+import { trustAccessRuntimeFromEnvironment } from './modules/trust/runtime.js';
 
 const port = Number.parseInt(process.env.API_PORT ?? '4000', 10);
 const host = process.env.API_HOST ?? '0.0.0.0';
@@ -28,6 +29,7 @@ const evidenceAnchorService = new EvidenceAnchorService(
   new DevelopmentHashchainProvider(),
   (caseId) => caseService.getCase(caseId),
 );
+const trustRuntime = trustAccessRuntimeFromEnvironment();
 const app = buildApp({
   logger: true,
   caseService,
@@ -37,6 +39,8 @@ const app = buildApp({
     (anchorId) => evidenceAnchorService.get(anchorId),
   ),
   evidenceAnchorService,
+  trustAccessService: trustRuntime.service,
+  enforceTrustAccess: trustRuntime.enforceTrustAccess,
   persistenceMode: pool ? 'POSTGRESQL' : 'IN_MEMORY_DEVELOPMENT_ADAPTER',
 });
 
