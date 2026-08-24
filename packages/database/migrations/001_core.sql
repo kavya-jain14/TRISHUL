@@ -1,7 +1,5 @@
 BEGIN;
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 CREATE TABLE cases (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   external_case_id text NOT NULL UNIQUE,
@@ -24,6 +22,8 @@ CREATE TABLE complaints (
   category text NOT NULL,
   reported_amount_minor bigint NOT NULL CHECK (reported_amount_minor >= 0),
   currency char(3) NOT NULL DEFAULT 'INR',
+  payer_reference text,
+  beneficiary_reference text,
   transaction_occurred_at timestamptz NOT NULL,
   reported_at timestamptz NOT NULL,
   evidence_references jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -59,8 +59,10 @@ CREATE TABLE transaction_events (
   case_id uuid REFERENCES cases(id),
   event_type text NOT NULL,
   occurred_at timestamptz NOT NULL,
+  event_hash char(64) NOT NULL,
   payload jsonb NOT NULL,
   provenance jsonb NOT NULL,
+  processed_at timestamptz,
   ingested_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -70,6 +72,7 @@ CREATE TABLE graph_versions (
   version integer NOT NULL CHECK (version > 0),
   source_event_id text NOT NULL,
   coverage_boundary text,
+  snapshot jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (case_id, version)
 );
@@ -80,6 +83,7 @@ CREATE TABLE graph_nodes (
   node_ref text NOT NULL,
   node_type text NOT NULL,
   label text NOT NULL,
+  first_graph_version integer NOT NULL CHECK (first_graph_version > 0),
   first_observed_at timestamptz NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (case_id, node_ref)
@@ -169,13 +173,14 @@ CREATE TABLE audit_events (
 );
 
 CREATE TABLE idempotency_keys (
-  key text PRIMARY KEY,
+  key text NOT NULL,
   operation text NOT NULL,
   request_hash char(64) NOT NULL,
   response_status integer NOT NULL,
   response_body jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  expires_at timestamptz NOT NULL
+  expires_at timestamptz NOT NULL,
+  PRIMARY KEY (operation, key)
 );
 
 CREATE INDEX graph_edges_case_version_idx ON graph_edges (case_id, graph_version);

@@ -42,6 +42,8 @@ Requirements: Node.js 22+ and npm 10+. Docker is optional for PostgreSQL and Red
 ```bash
 npm install
 cp .env.example .env
+docker compose up -d postgres redis
+npm run db:migrate
 npm run dev:api
 ```
 
@@ -58,7 +60,9 @@ Run the verification suite:
 npm run check
 ```
 
-Optional infrastructure:
+To run only the non-durable development adapter, start the API without `DATABASE_URL`.
+
+Infrastructure status:
 
 ```bash
 docker compose up -d postgres redis
@@ -74,7 +78,7 @@ docker compose up -d postgres redis
 6. PrivacyPass and lawful identity resolution
 7. Evidence anchors, command centre, and final QA
 
-See [docs/PHASE_0_STATUS.md](docs/PHASE_0_STATUS.md) for the current checkpoint.
+See [docs/PHASE_1_TRACE.md](docs/PHASE_1_TRACE.md) for the current checkpoint.
 
 ## Collaboration
 

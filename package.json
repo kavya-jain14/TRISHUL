@@ -19,6 +19,7 @@
     "build:packages": "npm run build --workspace @trishul/contracts && npm run build --workspace @trishul/database && npm run build --workspace @trishul/graph && npm run build --workspace @trishul/intelligence && npm run build --workspace @trishul/prediction && npm run build --workspace @trishul/trust && npm run build --workspace @trishul/audit",
     "build:apps": "npm run build --workspace @trishul/api && npm run build --workspace @trishul/worker && npm run build --workspace @trishul/psp-sandbox && npm run build --workspace @trishul/web",
     "check": "npm run format:check && npm run typecheck && npm test && npm run build",
+    "db:migrate": "npm run build --workspace @trishul/database && npm run migrate --workspace @trishul/database",
     "dev:api": "npm run dev --workspace @trishul/api",
     "dev:psp": "npm run dev --workspace @trishul/psp-sandbox",
     "dev:web": "npm run dev --workspace @trishul/web",

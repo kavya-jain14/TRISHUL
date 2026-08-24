@@ -14,12 +14,12 @@ flowchart TD
 
 ## Runtime applications
 
-| Application        | Responsibility                             | Phase 0 state                    |
-| ------------------ | ------------------------------------------ | -------------------------------- |
-| `apps/web`         | Command centre and investigation workspace | App shell and API readiness      |
-| `apps/api`         | Validated, scoped HTTP boundary            | Health and system manifest       |
-| `apps/worker`      | Trace/reforecast/alert job consumer        | Typed capability manifest        |
-| `apps/psp-sandbox` | Replaceable deterministic provider adapter | Golden scenario sequencing/reset |
+| Application        | Responsibility                             | Current state                                            |
+| ------------------ | ------------------------------------------ | -------------------------------------------------------- |
+| `apps/web`         | Command centre and investigation workspace | Backend-driven Case Intelligence and demo orchestration  |
+| `apps/api`         | Validated, scoped HTTP boundary            | Complaint, resolver, provider ledger, TRACE, case, graph |
+| `apps/worker`      | Trace/reforecast/alert job consumer        | Typed capability manifest                                |
+| `apps/psp-sandbox` | Replaceable deterministic provider adapter | Golden scenario sequencing/reset with shared contracts   |
 
 ## Shared packages
 
@@ -36,3 +36,7 @@ flowchart TD
 ## Integration boundary
 
 The simulator emits the same `ProviderEvent` contract expected from a future authorised bank/FI adapter. It is deterministic, labelled `SIMULATED`, and resettable. The frontend consumes API state and never manufactures financial edges.
+
+## Phase 1 persistence
+
+`CaseService` depends on a repository port. Tests and lightweight local work can use the in-memory adapter. A configured API process uses `PostgresCaseRepository`, which persists cases, complaints, financial transactions, raw provider events, processed-event state, immutable graph snapshots, normalised graph nodes/edges, and idempotency results. The same golden flow is tested across a repository/service recreation to prove restart persistence.

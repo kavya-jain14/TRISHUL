@@ -20,6 +20,10 @@ export const ComplaintCreateSchema = z
   })
   .strict();
 
+export const ComplaintSubmissionSchema = ComplaintCreateSchema.omit({
+  idempotencyKey: true,
+});
+
 export const CaseSummarySchema = z
   .object({
     caseId: IdentifierSchema,
@@ -32,5 +36,18 @@ export const CaseSummarySchema = z
   })
   .strict();
 
+export const CaseDetailSchema = z
+  .object({
+    summary: CaseSummarySchema,
+    complaint: ComplaintSubmissionSchema,
+    resolvedBeneficiaryAccount: IdentifierSchema.nullable(),
+    providerEventCount: z.number().int().nonnegative(),
+    processedEventCount: z.number().int().nonnegative(),
+    latestCoverageBoundary: z.string().trim().min(1).max(240).nullable(),
+  })
+  .strict();
+
 export type ComplaintCreate = z.infer<typeof ComplaintCreateSchema>;
+export type ComplaintSubmission = z.infer<typeof ComplaintSubmissionSchema>;
 export type CaseSummary = z.infer<typeof CaseSummarySchema>;
+export type CaseDetail = z.infer<typeof CaseDetailSchema>;

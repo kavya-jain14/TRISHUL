@@ -1,4 +1,4 @@
-# Phase 0 - foundation checkpoint
+# Phase 0 - foundation checkpoint (complete)
 
 ## Included in this checkpoint
 
@@ -22,11 +22,11 @@
 - No deployed blockchain network
 - No autonomous account freeze or guaranteed recovery
 
-## Next vertical slice
+## Handoff to Phase 1
 
-`POST /complaints` -> transaction resolver -> provider events -> provenance-backed graph -> `GET /cases/:id/graph`.
+`POST /complaints` -> transaction resolver -> provider events -> provenance-backed graph -> `GET /cases/:id/graph` is implemented in Phase 1.
 
-Acceptance for the next slice:
+The Phase 1 acceptance inherited from this checkpoint was:
 
 1. Complaint creation and resolution are idempotent.
 2. Replaying a provider event cannot duplicate an edge.

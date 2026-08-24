@@ -35,7 +35,7 @@ export const SANDBOX_SCENARIOS: readonly SandboxScenario[] = [
     events: [
       {
         eventId: 'evt-a-001-resolve',
-        caseId: 'case-golden-a',
+        caseId: 'case:complaint-golden-a',
         type: 'RESOLVE_TRANSACTION',
         occurredAt: '2026-08-24T10:15:00.000Z',
         provenance: simulatedProvenance('evt-a-001-resolve', '2026-08-24T10:15:00.000Z'),
@@ -45,7 +45,7 @@ export const SANDBOX_SCENARIOS: readonly SandboxScenario[] = [
       },
       {
         eventId: 'evt-a-002-payment',
-        caseId: 'case-golden-a',
+        caseId: 'case:complaint-golden-a',
         type: 'TRANSFER',
         occurredAt: '2026-08-24T10:00:00.000Z',
         provenance: simulatedProvenance('evt-a-002-payment', '2026-08-24T10:15:01.000Z'),
@@ -57,7 +57,7 @@ export const SANDBOX_SCENARIOS: readonly SandboxScenario[] = [
       },
       {
         eventId: 'evt-a-003-a-to-b',
-        caseId: 'case-golden-a',
+        caseId: 'case:complaint-golden-a',
         type: 'TRANSFER',
         occurredAt: '2026-08-24T10:07:00.000Z',
         provenance: simulatedProvenance('evt-a-003-a-to-b', '2026-08-24T10:15:02.000Z'),
@@ -69,7 +69,7 @@ export const SANDBOX_SCENARIOS: readonly SandboxScenario[] = [
       },
       {
         eventId: 'evt-a-004-a-to-c',
-        caseId: 'case-golden-a',
+        caseId: 'case:complaint-golden-a',
         type: 'TRANSFER',
         occurredAt: '2026-08-24T10:08:00.000Z',
         provenance: simulatedProvenance('evt-a-004-a-to-c', '2026-08-24T10:15:03.000Z'),
@@ -81,7 +81,7 @@ export const SANDBOX_SCENARIOS: readonly SandboxScenario[] = [
       },
       {
         eventId: 'evt-a-005-b-to-d',
-        caseId: 'case-golden-a',
+        caseId: 'case:complaint-golden-a',
         type: 'TRANSFER',
         occurredAt: '2026-08-24T10:13:00.000Z',
         provenance: simulatedProvenance('evt-a-005-b-to-d', '2026-08-24T10:15:04.000Z'),
@@ -93,7 +93,7 @@ export const SANDBOX_SCENARIOS: readonly SandboxScenario[] = [
       },
       {
         eventId: 'evt-a-006-d-to-e',
-        caseId: 'case-golden-a',
+        caseId: 'case:complaint-golden-a',
         type: 'TRANSFER',
         occurredAt: '2026-08-24T10:26:00.000Z',
         provenance: simulatedProvenance('evt-a-006-d-to-e', '2026-08-24T10:26:01.000Z'),
@@ -105,7 +105,7 @@ export const SANDBOX_SCENARIOS: readonly SandboxScenario[] = [
       },
       {
         eventId: 'evt-a-007-cashout',
-        caseId: 'case-golden-a',
+        caseId: 'case:complaint-golden-a',
         type: 'CASH_OUT',
         occurredAt: '2026-08-24T11:18:00.000Z',
         provenance: simulatedProvenance('evt-a-007-cashout', '2026-08-24T11:18:01.000Z'),
@@ -117,7 +117,7 @@ export const SANDBOX_SCENARIOS: readonly SandboxScenario[] = [
       },
       {
         eventId: 'evt-a-008-outcome',
-        caseId: 'case-golden-a',
+        caseId: 'case:complaint-golden-a',
         type: 'OUTCOME',
         occurredAt: '2026-08-24T11:30:00.000Z',
         provenance: simulatedProvenance('evt-a-008-outcome', '2026-08-24T11:30:01.000Z'),
@@ -137,7 +137,7 @@ export const SANDBOX_SCENARIOS: readonly SandboxScenario[] = [
     events: [
       {
         eventId: 'evt-b-001-resolve',
-        caseId: 'case-golden-b',
+        caseId: 'case:complaint-golden-b',
         type: 'RESOLVE_TRANSACTION',
         occurredAt: '2026-08-24T11:15:00.000Z',
         provenance: simulatedProvenance('evt-b-001-resolve', '2026-08-24T11:15:00.000Z'),
@@ -147,7 +147,7 @@ export const SANDBOX_SCENARIOS: readonly SandboxScenario[] = [
       },
       {
         eventId: 'evt-b-002-payment',
-        caseId: 'case-golden-b',
+        caseId: 'case:complaint-golden-b',
         type: 'TRANSFER',
         occurredAt: '2026-08-24T11:00:00.000Z',
         provenance: simulatedProvenance('evt-b-002-payment', '2026-08-24T11:15:01.000Z'),

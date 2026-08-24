@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   ForecastSnapshotSchema,
   GraphEdgeSchema,
+  IdempotencyKeySchema,
+  ProviderEventBatchSchema,
   ProviderEventSchema,
   assertCaseTransition,
   canTransitionCase,
@@ -44,6 +46,31 @@ describe('shared contracts', () => {
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it('rejects an event batch when any event has no provenance', () => {
+    const result = ProviderEventBatchSchema.safeParse({
+      events: [
+        {
+          eventId: 'evt-without-provenance',
+          caseId: 'case-golden-a',
+          type: 'TRANSFER',
+          occurredAt: '2026-08-24T10:00:00.000Z',
+          transactionId: 'T1001',
+          providerRef: 'RRN1001',
+          fromAccount: 'acct-kavya',
+          toAccount: 'acct-receiver-a',
+          amount: { amountMinor: 5_000_000, currency: 'INR' },
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('validates bounded idempotency keys', () => {
+    expect(IdempotencyKeySchema.safeParse('complaint:create:golden-a').success).toBe(true);
+    expect(IdempotencyKeySchema.safeParse('x'.repeat(97)).success).toBe(false);
   });
 
   it('accepts independent geo/time abstention as a valid forecast', () => {
