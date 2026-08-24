@@ -1,5 +1,5 @@
 import cors from '@fastify/cors';
-import { DevelopmentHashchainProvider, BlockchainSimulator } from '@trishul/audit';
+import { DevelopmentHashchainProvider } from '@trishul/audit';
 import { InMemoryTrustRepository, TrustAccessError, TrustAccessService } from '@trishul/trust';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
@@ -12,7 +12,11 @@ import { EvidenceAnchorService } from './modules/evidence-anchors/anchor-service
 import { registerEvidenceAnchorRoutes } from './modules/evidence-anchors/routes.js';
 import { registerTrustAccessGuard } from './modules/trust/guard.js';
 import { registerTrustRoutes } from './modules/trust/routes.js';
-import { IdentityResolutionService } from './modules/identity-resolution/identity-resolution-service.js';
+import {
+  IdentityResolutionError,
+  IdentityResolutionService,
+  ReferenceOnlyDevelopmentIdentityProvider,
+} from './modules/identity-resolution/identity-resolution-service.js';
 import { InMemoryIdentityResolutionRepository } from './modules/identity-resolution/in-memory-identity-resolution-repository.js';
 import { registerIdentityResolutionRoutes } from './modules/identity-resolution/routes.js';
 
@@ -36,7 +40,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   const caseService = options.caseService ?? new CaseService(new InMemoryCaseRepository());
   const trustAccessService =
-    options.trustAccessService ?? new TrustAccessService(new InMemoryTrustRepository(), new BlockchainSimulator());
+    options.trustAccessService ?? new TrustAccessService(new InMemoryTrustRepository());
   if (options.enforceTrustAccess) registerTrustAccessGuard(app, trustAccessService);
   const evidenceAnchorService =
     options.evidenceAnchorService ??
@@ -50,8 +54,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   registerTrustRoutes(app, trustAccessService);
 
   const identityResolutionService =
-    options.identityResolutionService ?? new IdentityResolutionService(new InMemoryIdentityResolutionRepository());
-  registerIdentityResolutionRoutes(app, identityResolutionService);
+    options.identityResolutionService ??
+    new IdentityResolutionService(
+      new InMemoryIdentityResolutionRepository(),
+      new ReferenceOnlyDevelopmentIdentityProvider(),
+      (caseId) => caseService.getCase(caseId),
+    );
+  registerIdentityResolutionRoutes(app, identityResolutionService, trustAccessService);
 
   app.get('/api/v1/health', async () => ({
     status: 'ok',
@@ -94,6 +103,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       'SUBJECT_BOUND_CHALLENGE_PROOF',
       'CAPABILITY_AND_CASE_SCOPED_ACCESS',
       'REPLAY_SAFE_NONCE_VERIFICATION',
+      'TWO_PERSON_IDENTITY_RESOLUTION',
+      'REFERENCE_ONLY_IDENTITY_RESPONSE',
     ],
   }));
 
@@ -111,6 +122,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         error: error.code,
         message: error.message,
         reasonCodes: error.reasonCodes,
+      });
+    }
+
+    if (error instanceof IdentityResolutionError) {
+      return reply.status(error.statusCode).send({
+        error: error.code,
+        message: error.message,
       });
     }
 

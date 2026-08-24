@@ -1,43 +1,53 @@
+import {
+  IdentifierSchema,
+  IdentityResolutionApprovalSchema,
+  IdentityResolutionCreateRequestSchema,
+} from '@trishul/contracts';
+import type { TrustAccessService } from '@trishul/trust';
 import type { FastifyInstance } from 'fastify';
-import { IdentityResolutionService } from './identity-resolution-service.js';
-import { IdentityResolutionCreateRequestSchema, IdentityResolutionApprovalSchema } from '@trishul/contracts';
+import { authorizeBearerRequest } from '../trust/guard.js';
+import type { IdentityResolutionService } from './identity-resolution-service.js';
 
 export function registerIdentityResolutionRoutes(
   app: FastifyInstance,
-  service: IdentityResolutionService
+  service: IdentityResolutionService,
+  trustAccessService: TrustAccessService,
 ): void {
   app.post('/api/v1/cases/:caseId/identity-resolution', async (request, reply) => {
-    // @ts-expect-error - session is attached by guard
-    const session = request.trustSession;
-    if (!session) {
-      return reply.status(401).send({ error: 'TRUST_SESSION_REQUIRED' });
-    }
-
-    const { caseId } = request.params as { caseId: string };
-    
-    // In a real app we'd validate body against IdentityResolutionCreateRequestSchema if we needed more fields
-    // IdentityResolutionCreateRequestSchema.parse(request.body);
-
-    const result = await service.requestResolution(caseId, session);
+    const { caseId: rawCaseId } = request.params as { caseId: string };
+    const caseId = IdentifierSchema.parse(rawCaseId);
+    const body = IdentityResolutionCreateRequestSchema.parse(request.body);
+    const session = await authorizeBearerRequest(
+      request,
+      trustAccessService,
+      'IDENTITY_RESOLUTION_REQUEST',
+      caseId,
+    );
+    const result = await service.requestResolution(caseId, body.justification, session);
     return reply.status(201).send(result);
   });
 
-  app.post('/api/v1/identity-resolution/:requestId/approve', async (request, reply) => {
-    // @ts-expect-error - session is attached by guard
-    const session = request.trustSession;
-    if (!session) {
-      return reply.status(401).send({ error: 'TRUST_SESSION_REQUIRED' });
-    }
-
-    const { requestId } = request.params as { requestId: string };
-    const body = IdentityResolutionApprovalSchema.parse(request.body);
-    
-    if (!body.approved) {
-      // In a real app, handle rejection
-      return reply.status(400).send({ error: 'Rejection not yet implemented' });
-    }
-
-    const result = await service.approveResolution(requestId, session);
-    return reply.status(200).send(result);
-  });
+  app.post(
+    '/api/v1/cases/:caseId/identity-resolution/:requestId/decision',
+    async (request, reply) => {
+      const params = request.params as { caseId: string; requestId: string };
+      const caseId = IdentifierSchema.parse(params.caseId);
+      const requestId = params.requestId;
+      const body = IdentityResolutionApprovalSchema.parse(request.body);
+      const session = await authorizeBearerRequest(
+        request,
+        trustAccessService,
+        'IDENTITY_RESOLUTION_APPROVE',
+        caseId,
+      );
+      const result = await service.decideResolution(
+        caseId,
+        requestId,
+        body.decision,
+        body.justification,
+        session,
+      );
+      return reply.status(200).send(result);
+    },
+  );
 }

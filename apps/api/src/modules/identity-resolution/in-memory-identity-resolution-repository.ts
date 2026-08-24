@@ -1,5 +1,5 @@
 import type { IdentityResolutionRepository } from '@trishul/database';
-import type { IdentityResolutionRequest, IdentityResolutionStatus } from '@trishul/contracts';
+import type { IdentityResolutionRequest } from '@trishul/contracts';
 
 export class InMemoryIdentityResolutionRepository implements IdentityResolutionRepository {
   private readonly requests = new Map<string, IdentityResolutionRequest>();
@@ -13,22 +13,26 @@ export class InMemoryIdentityResolutionRepository implements IdentityResolutionR
     return req ? { ...req } : null;
   }
 
-  async updateRequestStatus(
+  async decideRequest(
     requestId: string,
-    status: IdentityResolutionStatus,
-    supervisorId?: string,
-    providerReference?: string,
-    resolvedAt?: string
+    caseId: string,
+    status: 'APPROVED' | 'REJECTED',
+    decidedBy: string,
+    decisionJustification: string,
+    providerReference: string | undefined,
+    resolvedAt: string,
   ): Promise<boolean> {
     const req = this.requests.get(requestId);
-    if (!req) return false;
+    if (!req || req.caseId !== caseId || req.status !== 'PENDING') return false;
 
-    req.status = status;
-    if (supervisorId) req.supervisorId = supervisorId;
-    if (providerReference) req.providerReference = providerReference;
-    if (resolvedAt) req.resolvedAt = resolvedAt;
-
-    this.requests.set(requestId, req);
+    this.requests.set(requestId, {
+      ...req,
+      status,
+      decidedBy,
+      decisionJustification,
+      ...(providerReference ? { providerReference } : {}),
+      resolvedAt,
+    });
     return true;
   }
 }

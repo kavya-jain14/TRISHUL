@@ -19,21 +19,33 @@ does not introduce another API, package manager, database schema, or blockchain 
 Invalid signatures, mismatched subjects/cases, revoked credentials, replayed nonces, expired
 sessions, and privilege escalation are rejected by negative tests.
 
+## Durable persistence and identity boundary
+
+- With `DATABASE_URL`, issuer state, revocations, challenges, token digests, sessions, trust audit
+  records, and identity-resolution decisions use PostgreSQL migration `006_trust_persistence.sql`.
+- Challenge consumption and identity decisions use conditional writes so replay or concurrent
+  approval cannot create a second outcome.
+- Identity resolution uses separate request and approval capabilities, requires the same case scope,
+  and forbids the requester from deciding their own request.
+- The API returns only an opaque provider reference. It never returns KYC, address, national ID, or
+  other resolved PII.
+- The reference-only provider is explicitly a development adapter. Production returns an unavailable
+  response until an authorised institutional provider adapter is configured.
+
 ## Prototype boundary
 
 - This is signed challenge-response credential verification, not a claim that a full anonymous
   PrivacyPass/ZKP protocol is already implemented.
-- The in-memory issuer, revocation, challenge, and session stores are replaceable development
-  adapters. Production requires durable PostgreSQL or authorised institutional providers.
+- In-memory repositories are development adapters. Production startup requires PostgreSQL-backed
+  Trust/Access persistence.
 - Issuer registration and revocation are intentionally not exposed as public HTTP routes. Their
   production administration needs authenticated governance and audit anchoring first.
-- `enforceTrustAccess` is opt-in so the deterministic presentation simulator remains runnable
-  offline. A production composition root must enable it.
+- `enforceTrustAccess` is optional only for the deterministic presentation simulator. Identity
+  resolution remains authenticated even in that mode.
 
 ## Next hardening slice
 
-- durable issuer/key-rotation and credential-revocation repositories;
-- atomic challenge consumption and session persistence across API replicas;
 - authenticated issuer/admin governance with append-only audit events;
-- capability-gated evidence reads and two-person lawful identity resolution;
+- key rotation and retention policy;
+- authorised institutional identity-provider integration with audited access delivery;
 - a real PrivacyPass/ZKP verifier adapter once an issuer protocol and cryptographic suite are locked.

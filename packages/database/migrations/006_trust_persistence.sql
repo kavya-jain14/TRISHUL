@@ -1,4 +1,4 @@
--- 005_trust_persistence.sql
+-- 006_trust_persistence.sql
 
 CREATE TABLE trust_issuers (
     issuer_id VARCHAR(255) PRIMARY KEY,
@@ -49,12 +49,23 @@ CREATE TABLE trust_identity_resolution_requests (
     request_id UUID PRIMARY KEY,
     case_id VARCHAR(255) NOT NULL,
     investigator_id VARCHAR(255) NOT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
-    supervisor_id VARCHAR(255),
+    request_justification TEXT NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING'
+        CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'FAILED')),
+    decided_by VARCHAR(255),
+    decision_justification TEXT,
     provider_reference VARCHAR(255),
     requested_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    resolved_at TIMESTAMPTZ
+    resolved_at TIMESTAMPTZ,
+    CHECK (
+        (status = 'PENDING' AND decided_by IS NULL AND resolved_at IS NULL)
+        OR
+        (status <> 'PENDING' AND decided_by IS NOT NULL AND decision_justification IS NOT NULL AND resolved_at IS NOT NULL)
+    )
 );
+
+CREATE INDEX idx_identity_resolution_case_status
+    ON trust_identity_resolution_requests(case_id, status);
 
 CREATE TABLE trust_audit_records (
     audit_id UUID PRIMARY KEY,
@@ -65,4 +76,3 @@ CREATE TABLE trust_audit_records (
     details JSONB NOT NULL,
     integrity_hash VARCHAR(255) NOT NULL
 );
-

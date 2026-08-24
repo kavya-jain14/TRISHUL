@@ -28,7 +28,7 @@ function fixture() {
   const subject = keyPair();
   const registry = new InMemoryTrustRepository();
   registry.registerIssuer('issuer:bank-a', issuer.publicKeyPem, true);
-  const service = new TrustAccessService(registry, undefined, {}, () => new Date(now));
+  const service = new TrustAccessService(registry, {}, () => new Date(now));
   const claims: CredentialClaims = {
     credentialId: 'credential:investigator-a',
     issuerId: 'issuer:bank-a',
@@ -85,12 +85,12 @@ describe('TrustAccessService', () => {
     expect(await service.authorize(result.accessToken, 'CASE_READ', 'case:alpha')).toEqual(
       result.session,
     );
-    await expect(service.authorize(result.accessToken, 'CASE_WRITE', 'case:alpha')).rejects.toThrowError(
-      expect.objectContaining({ code: 'TRUST_CAPABILITY_DENIED' }),
-    );
-    await expect(service.authorize(result.accessToken, 'CASE_READ', 'case:beta')).rejects.toThrowError(
-      expect.objectContaining({ code: 'TRUST_CASE_SCOPE_DENIED' }),
-    );
+    await expect(
+      service.authorize(result.accessToken, 'CASE_WRITE', 'case:alpha'),
+    ).rejects.toThrowError(expect.objectContaining({ code: 'TRUST_CAPABILITY_DENIED' }));
+    await expect(
+      service.authorize(result.accessToken, 'CASE_READ', 'case:beta'),
+    ).rejects.toThrowError(expect.objectContaining({ code: 'TRUST_CASE_SCOPE_DENIED' }));
   });
 
   it('rejects a forged issuer signature without burning the challenge', async () => {
@@ -114,7 +114,9 @@ describe('TrustAccessService', () => {
         reasonCodes: expect.arrayContaining(['SIGNATURE_INVALID']),
       }),
     );
-    expect((await service.verify({ ...request, credential })).session.subjectId).toBe('investigator:a');
+    expect((await service.verify({ ...request, credential })).session.subjectId).toBe(
+      'investigator:a',
+    );
   });
 
   it('binds the proof to the requested subject and does not consume a nonce on mismatch', async () => {
@@ -139,11 +141,13 @@ describe('TrustAccessService', () => {
     );
 
     expect(
-      (await service.verify({
-        challengeId: challenge.challengeId,
-        credential,
-        proofSignature: proof(challenge, claims, subject.privateKey),
-      })).session.subjectId,
+      (
+        await service.verify({
+          challengeId: challenge.challengeId,
+          credential,
+          proofSignature: proof(challenge, claims, subject.privateKey),
+        })
+      ).session.subjectId,
     ).toBe(claims.subjectId);
   });
 
@@ -186,9 +190,9 @@ describe('TrustAccessService', () => {
     });
 
     await registry.revokeCredential(claims.credentialId, new Date().toISOString());
-    await expect(service.authorize(result.accessToken, 'CASE_READ', 'case:alpha')).rejects.toThrowError(
-      expect.objectContaining({ code: 'CREDENTIAL_REVOKED' }),
-    );
+    await expect(
+      service.authorize(result.accessToken, 'CASE_READ', 'case:alpha'),
+    ).rejects.toThrowError(expect.objectContaining({ code: 'CREDENTIAL_REVOKED' }));
   });
 
   it('rejects proof replay after the nonce is consumed', async () => {
@@ -218,7 +222,7 @@ describe('TrustAccessService', () => {
     await expect(
       service.createChallenge({
         subjectId: 'investigator:a',
-        capability: 'IDENTITY_RESOLUTION',
+        capability: 'IDENTITY_RESOLUTION_REQUEST',
         purpose: 'LAW_ENFORCEMENT_REQUEST',
       }),
     ).rejects.toThrowError(

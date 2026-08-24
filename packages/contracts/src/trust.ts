@@ -12,7 +12,8 @@ export const TrustCapabilitySchema = z.enum([
   'CASE_READ',
   'CASE_WRITE',
   'EVIDENCE_ANCHOR',
-  'IDENTITY_RESOLUTION',
+  'IDENTITY_RESOLUTION_REQUEST',
+  'IDENTITY_RESOLUTION_APPROVE',
   'AUDIT_READ',
 ]);
 

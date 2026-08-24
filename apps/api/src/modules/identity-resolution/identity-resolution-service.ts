@@ -1,70 +1,201 @@
+import { randomUUID } from 'node:crypto';
+import type {
+  IdentityResolutionDecision,
+  IdentityResolutionRequest,
+  IdentityResolutionResult,
+  TrustSession,
+} from '@trishul/contracts';
 import type { IdentityResolutionRepository } from '@trishul/database';
-import { randomUUID } from 'crypto';
-import type { TrustSession, IdentityResolutionRequest, IdentityResolutionResult } from '@trishul/contracts';
+
+export interface IdentityResolutionProvider {
+  readonly available: boolean;
+  /** Must be idempotent for a repeated requestId. */
+  authorizeResolution(input: {
+    requestId: string;
+    caseId: string;
+  }): Promise<{ providerReference: string }>;
+}
+
+export class ReferenceOnlyDevelopmentIdentityProvider implements IdentityResolutionProvider {
+  readonly available = true;
+  private readonly references = new Map<string, string>();
+
+  async authorizeResolution(input: { requestId: string }): Promise<{ providerReference: string }> {
+    const providerReference =
+      this.references.get(input.requestId) ?? `simulated-provider-ref:${randomUUID()}`;
+    this.references.set(input.requestId, providerReference);
+    return { providerReference };
+  }
+}
+
+export class UnavailableIdentityResolutionProvider implements IdentityResolutionProvider {
+  readonly available = false;
+
+  async authorizeResolution(): Promise<never> {
+    throw new IdentityResolutionError(
+      'IDENTITY_PROVIDER_UNAVAILABLE',
+      'An authorised identity-resolution provider is not configured.',
+      503,
+    );
+  }
+}
+
+export class IdentityResolutionError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = 'IdentityResolutionError';
+  }
+}
 
 export class IdentityResolutionService {
-  constructor(private readonly repository: IdentityResolutionRepository) {}
+  constructor(
+    private readonly repository: IdentityResolutionRepository,
+    private readonly provider: IdentityResolutionProvider,
+    private readonly assertCaseExists: (caseId: string) => Promise<unknown>,
+    private readonly clock: () => Date = () => new Date(),
+  ) {}
 
-  async requestResolution(caseId: string, investigatorSession: TrustSession): Promise<IdentityResolutionRequest> {
-    if (!investigatorSession.capabilities.includes('IDENTITY_RESOLUTION')) {
-      throw new Error('Investigator does not have the IDENTITY_RESOLUTION capability.');
+  async requestResolution(
+    caseId: string,
+    justification: string,
+    session: TrustSession,
+  ): Promise<IdentityResolutionRequest> {
+    if (!this.provider.available) {
+      throw new IdentityResolutionError(
+        'IDENTITY_PROVIDER_UNAVAILABLE',
+        'An authorised identity-resolution provider is not configured.',
+        503,
+      );
     }
-    
-    // In a real implementation, we might check if the case belongs to the investigator's tenant.
-    // For this demo, we assume the TrustAccessGuard has already enforced case scoping.
-    
-    const request: IdentityResolutionRequest = {
+    this.requireSession(session, 'IDENTITY_RESOLUTION_REQUEST', caseId);
+    if (session.role !== 'INVESTIGATOR') {
+      throw new IdentityResolutionError(
+        'IDENTITY_REQUEST_ROLE_DENIED',
+        'Only an authorised investigator can request identity resolution.',
+        403,
+      );
+    }
+    if (!['FRAUD_INVESTIGATION', 'LAW_ENFORCEMENT_REQUEST'].includes(session.purpose)) {
+      throw new IdentityResolutionError(
+        'IDENTITY_REQUEST_PURPOSE_DENIED',
+        'Identity resolution requires an investigation or law-enforcement purpose.',
+        403,
+      );
+    }
+    await this.assertCaseExists(caseId);
+
+    const resolutionRequest: IdentityResolutionRequest = {
       requestId: randomUUID(),
       caseId,
-      investigatorId: investigatorSession.subjectId,
+      investigatorId: session.subjectId,
+      requestJustification: justification,
       status: 'PENDING',
-      requestedAt: new Date().toISOString(),
+      requestedAt: this.clock().toISOString(),
     };
-
-    await this.repository.createRequest(request);
-    return request;
+    await this.repository.createRequest(resolutionRequest);
+    return resolutionRequest;
   }
 
-  async approveResolution(requestId: string, supervisorSession: TrustSession): Promise<IdentityResolutionResult> {
-    if (supervisorSession.role !== 'SUPERVISOR' && supervisorSession.role !== 'LEA_OFFICER') {
-      throw new Error('Only a SUPERVISOR or LEA_OFFICER can approve an identity resolution request.');
+  async decideResolution(
+    caseId: string,
+    requestId: string,
+    decision: IdentityResolutionDecision,
+    justification: string,
+    session: TrustSession,
+  ): Promise<IdentityResolutionResult> {
+    this.requireSession(session, 'IDENTITY_RESOLUTION_APPROVE', caseId);
+    if (!['SUPERVISOR', 'LEA_OFFICER'].includes(session.role)) {
+      throw new IdentityResolutionError(
+        'IDENTITY_APPROVAL_ROLE_DENIED',
+        'Only an authorised supervisor or LEA officer can decide identity resolution.',
+        403,
+      );
+    }
+    if (session.purpose !== 'LAW_ENFORCEMENT_REQUEST') {
+      throw new IdentityResolutionError(
+        'IDENTITY_APPROVAL_PURPOSE_DENIED',
+        'Identity resolution approval requires a law-enforcement purpose.',
+        403,
+      );
     }
 
-    const request = await this.repository.getRequest(requestId);
-    if (!request) {
-      throw new Error('Identity resolution request not found.');
+    const resolutionRequest = await this.repository.getRequest(requestId);
+    if (!resolutionRequest || resolutionRequest.caseId !== caseId) {
+      throw new IdentityResolutionError(
+        'IDENTITY_RESOLUTION_NOT_FOUND',
+        'Identity resolution request was not found for this case.',
+        404,
+      );
+    }
+    if (resolutionRequest.status !== 'PENDING') {
+      throw new IdentityResolutionError(
+        'IDENTITY_RESOLUTION_ALREADY_DECIDED',
+        'Identity resolution request has already been decided.',
+        409,
+      );
+    }
+    if (resolutionRequest.investigatorId === session.subjectId) {
+      throw new IdentityResolutionError(
+        'TWO_PERSON_RULE_REQUIRED',
+        'The requester cannot approve or reject their own identity resolution request.',
+        403,
+      );
     }
 
-    if (request.status !== 'PENDING') {
-      throw new Error(`Cannot approve request in status: ${request.status}`);
-    }
-
-    // Two-person rule: A supervisor cannot approve their own request if they were acting as the investigator.
-    if (request.investigatorId === supervisorSession.subjectId) {
-      throw new Error('A supervisor cannot approve their own identity resolution request.');
-    }
-
-    // Approve the request
-    const providerReference = `provider-ref-${randomUUID()}`;
-    const resolvedAt = new Date().toISOString();
-    
-    await this.repository.updateRequestStatus(
+    const status = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+    const providerReference =
+      decision === 'APPROVE'
+        ? (await this.provider.authorizeResolution({ requestId, caseId })).providerReference
+        : undefined;
+    const resolvedAt = this.clock().toISOString();
+    const decided = await this.repository.decideRequest(
       requestId,
-      'APPROVED',
-      supervisorSession.subjectId,
+      caseId,
+      status,
+      session.subjectId,
+      justification,
       providerReference,
-      resolvedAt
+      resolvedAt,
     );
+    if (!decided) {
+      throw new IdentityResolutionError(
+        'IDENTITY_RESOLUTION_CONCURRENT_DECISION',
+        'Identity resolution request was decided concurrently.',
+        409,
+      );
+    }
 
-    // Mock Bank Resolution Adapter: Return simulated PII payload
     return {
       requestId,
-      status: 'APPROVED',
-      pii: {
-        name: 'John Doe',
-        address: '123 Fake Street, Faketown',
-        nationalId: 'ID-987654321',
-      }
+      caseId,
+      status,
+      ...(providerReference ? { providerReference } : {}),
+      resolvedAt,
     };
+  }
+
+  private requireSession(
+    session: TrustSession,
+    capability: 'IDENTITY_RESOLUTION_REQUEST' | 'IDENTITY_RESOLUTION_APPROVE',
+    caseId: string,
+  ): void {
+    if (!session.capabilities.includes(capability)) {
+      throw new IdentityResolutionError(
+        'IDENTITY_RESOLUTION_CAPABILITY_DENIED',
+        `The verified session does not grant ${capability}.`,
+        403,
+      );
+    }
+    if (session.caseId !== caseId) {
+      throw new IdentityResolutionError(
+        'IDENTITY_RESOLUTION_CASE_SCOPE_DENIED',
+        'The verified session is not bound to this case.',
+        403,
+      );
+    }
   }
 }

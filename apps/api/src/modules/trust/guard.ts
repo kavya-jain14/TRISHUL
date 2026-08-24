@@ -1,11 +1,18 @@
-import { IdentifierSchema, type TrustCapability } from '@trishul/contracts';
+import { IdentifierSchema, type TrustCapability, type TrustSession } from '@trishul/contracts';
 import { TrustAccessError, type TrustAccessService } from '@trishul/trust';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    trustSession?: TrustSession;
+  }
+}
 
 export function registerTrustAccessGuard(app: FastifyInstance, service: TrustAccessService): void {
   app.addHook('preHandler', async (request) => {
     if (request.method === 'OPTIONS') return;
     const path = request.url.split('?', 1)[0] ?? request.url;
+    if (path.includes('/identity-resolution')) return;
     const caseMatch = /^\/api\/v1\/cases\/([^/]+)/.exec(path);
     if (caseMatch?.[1]) {
       const id = IdentifierSchema.parse(decodeURIComponent(caseMatch[1]));
@@ -16,7 +23,6 @@ export function registerTrustAccessGuard(app: FastifyInstance, service: TrustAcc
             ? 'EVIDENCE_ANCHOR'
             : 'CASE_WRITE';
       const session = await service.authorize(bearerToken(request), capability, id);
-      // @ts-expect-error - Attach session to request for downstream handlers
       request.trustSession = session;
       return;
     }
@@ -25,10 +31,18 @@ export function registerTrustAccessGuard(app: FastifyInstance, service: TrustAcc
       const body = request.body as { caseId?: unknown } | null;
       const id = IdentifierSchema.parse(body?.caseId);
       const session = await service.authorize(bearerToken(request), 'CASE_WRITE', id);
-      // @ts-expect-error - Attach session to request for downstream handlers
       request.trustSession = session;
     }
   });
+}
+
+export async function authorizeBearerRequest(
+  request: FastifyRequest,
+  service: TrustAccessService,
+  capability: TrustCapability,
+  caseId: string,
+) {
+  return service.authorize(bearerToken(request), capability, caseId);
 }
 
 function bearerToken(request: FastifyRequest): string {

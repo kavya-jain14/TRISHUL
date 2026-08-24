@@ -35,6 +35,20 @@ function signedCredential(claims: CredentialClaims, issuerPrivateKey: KeyObject)
 }
 
 describe('canonical Trust/Access HTTP flow', () => {
+  it('does not expose issuer, revocation, or audit governance over HTTP', async () => {
+    const app = buildApp();
+    apps.push(app);
+
+    for (const request of [
+      { method: 'GET' as const, url: '/api/v1/trust/issuers' },
+      { method: 'POST' as const, url: '/api/v1/trust/issuers', payload: {} },
+      { method: 'POST' as const, url: '/api/v1/trust/revocations', payload: {} },
+      { method: 'GET' as const, url: '/api/v1/trust/audit' },
+    ]) {
+      expect((await app.inject(request)).statusCode).toBe(404);
+    }
+  });
+
   it('protects the case surface with a signed, subject-bound, case-scoped session', async () => {
     const issuer = keyPair();
     const subject = keyPair();
@@ -42,7 +56,6 @@ describe('canonical Trust/Access HTTP flow', () => {
     registry.registerIssuer('issuer:bank-a', issuer.publicKeyPem, true);
     const trustAccessService = new TrustAccessService(
       registry,
-      undefined,
       {},
       () => new Date('2026-08-24T12:00:00.000Z'),
     );
