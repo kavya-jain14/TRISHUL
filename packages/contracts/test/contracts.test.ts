@@ -6,6 +6,7 @@ import {
   IdempotencyKeySchema,
   ProviderEventBatchSchema,
   ProviderEventSchema,
+  TraceGraphExpansionJobSchema,
   assertCaseTransition,
   canTransitionCase,
 } from '../src/index.js';
@@ -19,6 +20,21 @@ const provenance = {
 } as const;
 
 describe('shared contracts', () => {
+  it('rejects unknown fields in durable worker jobs', () => {
+    expect(
+      TraceGraphExpansionJobSchema.safeParse({
+        caseId: 'case-worker-contract',
+        idempotencyKey: 'trace-worker-contract',
+      }).success,
+    ).toBe(true);
+    expect(
+      TraceGraphExpansionJobSchema.safeParse({
+        caseId: 'case-worker-contract',
+        idempotencyKey: 'trace-worker-contract',
+        rawProviderPayload: { shouldNotCrossBoundary: true },
+      }).success,
+    ).toBe(false);
+  });
   it('accepts a provenance-backed provider transfer', () => {
     const result = ProviderEventSchema.safeParse({
       eventId: 'evt-transfer-1',

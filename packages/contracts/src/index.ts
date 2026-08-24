@@ -9,3 +9,4 @@ export * from './provider-events.js';
 export * from './risk.js';
 export * from './state-machine.js';
 export * from './trace.js';
+export * from './worker-jobs.js';
