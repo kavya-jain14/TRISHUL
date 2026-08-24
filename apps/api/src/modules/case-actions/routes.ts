@@ -25,7 +25,7 @@ export function registerCaseActionRoutes(
     '/api/v1/cases/:caseId/actions',
     async (request, reply) => {
       const id = IdentifierSchema.parse(request.params.caseId);
-      const session = trust.authorize(bearerToken(request), 'CASE_WRITE', id);
+      const session = await trust.authorize(bearerToken(request), 'CASE_WRITE', id);
       const result = await service.record(id, request.body, idempotencyKey(request), session);
       return reply.status(result.replayed ? 200 : 201).send(result);
     },
@@ -33,7 +33,7 @@ export function registerCaseActionRoutes(
 
   app.get<{ Params: { caseId: string } }>('/api/v1/cases/:caseId/actions', async (request) => {
     const id = IdentifierSchema.parse(request.params.caseId);
-    trust.authorize(bearerToken(request), 'CASE_READ', id);
+    await trust.authorize(bearerToken(request), 'CASE_READ', id);
     return { actions: await service.list(id) };
   });
 }

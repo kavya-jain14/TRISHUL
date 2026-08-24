@@ -1,6 +1,8 @@
 import { Pool } from 'pg';
 import { InMemoryCaseActionRepository, PostgresCaseActionRepository } from '@trishul/database';
 import { DevelopmentHashchainProvider } from '@trishul/audit';
+import { PostgresIdentityResolutionRepository, PostgresTrustRepository } from '@trishul/database';
+import { InMemoryTrustRepository } from '@trishul/trust';
 import { buildApp } from './app.js';
 import { InMemoryCaseRepository } from './modules/cases/case-repository.js';
 import { CaseService } from './modules/cases/case-service.js';
@@ -9,6 +11,12 @@ import { CaseActionService } from './modules/case-actions/service.js';
 import { InMemoryEvidenceAnchorRepository } from './modules/evidence-anchors/anchor-repository.js';
 import { EvidenceAnchorService } from './modules/evidence-anchors/anchor-service.js';
 import { PostgresEvidenceAnchorRepository } from './modules/evidence-anchors/postgres-anchor-repository.js';
+import { InMemoryIdentityResolutionRepository } from './modules/identity-resolution/in-memory-identity-resolution-repository.js';
+import {
+  IdentityResolutionService,
+  ReferenceOnlyDevelopmentIdentityProvider,
+  UnavailableIdentityResolutionProvider,
+} from './modules/identity-resolution/identity-resolution-service.js';
 import { trustAccessRuntimeFromEnvironment } from './modules/trust/runtime.js';
 
 const port = Number.parseInt(process.env.API_PORT ?? '4000', 10);
@@ -29,7 +37,18 @@ const evidenceAnchorService = new EvidenceAnchorService(
   new DevelopmentHashchainProvider(),
   (caseId) => caseService.getCase(caseId),
 );
-const trustRuntime = trustAccessRuntimeFromEnvironment();
+const trustRepository = pool ? new PostgresTrustRepository(pool) : new InMemoryTrustRepository();
+const trustRuntime = await trustAccessRuntimeFromEnvironment(process.env, {
+  repository: trustRepository,
+  durablePersistence: Boolean(pool),
+});
+const identityRepository = pool
+  ? new PostgresIdentityResolutionRepository(pool)
+  : new InMemoryIdentityResolutionRepository();
+const identityProvider =
+  process.env.NODE_ENV === 'production'
+    ? new UnavailableIdentityResolutionProvider()
+    : new ReferenceOnlyDevelopmentIdentityProvider();
 const app = buildApp({
   logger: true,
   caseService,
@@ -41,6 +60,11 @@ const app = buildApp({
   evidenceAnchorService,
   trustAccessService: trustRuntime.service,
   enforceTrustAccess: trustRuntime.enforceTrustAccess,
+  identityResolutionService: new IdentityResolutionService(
+    identityRepository,
+    identityProvider,
+    (caseId) => caseService.getCase(caseId),
+  ),
   persistenceMode: pool ? 'POSTGRESQL' : 'IN_MEMORY_DEVELOPMENT_ADAPTER',
 });
 

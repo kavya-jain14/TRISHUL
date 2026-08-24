@@ -12,7 +12,8 @@ export const TrustCapabilitySchema = z.enum([
   'CASE_READ',
   'CASE_WRITE',
   'EVIDENCE_ANCHOR',
-  'IDENTITY_RESOLUTION',
+  'IDENTITY_RESOLUTION_REQUEST',
+  'IDENTITY_RESOLUTION_APPROVE',
   'AUDIT_READ',
 ]);
 
@@ -132,6 +133,40 @@ export const TrustVerificationResultSchema = z
   })
   .strict();
 
+export const TrustIssuerSchema = z
+  .object({
+    issuerId: IdentifierSchema,
+    publicKeyPem: PublicKeyPemSchema,
+    active: z.boolean(),
+  })
+  .strict();
+
+export const TrustIssuerRegistrationRequestSchema = z
+  .object({
+    issuerId: IdentifierSchema,
+    publicKeyPem: PublicKeyPemSchema,
+    active: z.boolean().optional().default(true),
+  })
+  .strict();
+
+export const TrustRevocationRequestSchema = z
+  .object({
+    credentialId: IdentifierSchema,
+  })
+  .strict();
+
+export const TrustAuditRecordSchema = z
+  .object({
+    auditId: z.string().uuid(),
+    timestamp: IsoDateTimeSchema,
+    action: z.string(),
+    actorId: IdentifierSchema,
+    targetId: IdentifierSchema.optional(),
+    details: z.record(z.unknown()),
+    integrityHash: z.string(),
+  })
+  .strict();
+
 export type CredentialRole = z.infer<typeof CredentialRoleSchema>;
 export type TrustCapability = z.infer<typeof TrustCapabilitySchema>;
 export type TrustPurpose = z.infer<typeof TrustPurposeSchema>;
@@ -142,3 +177,7 @@ export type TrustChallenge = z.infer<typeof TrustChallengeSchema>;
 export type TrustVerificationRequest = z.infer<typeof TrustVerificationRequestSchema>;
 export type TrustSession = z.infer<typeof TrustSessionSchema>;
 export type TrustVerificationResult = z.infer<typeof TrustVerificationResultSchema>;
+export type TrustIssuer = z.infer<typeof TrustIssuerSchema>;
+export type TrustIssuerRegistrationRequest = z.infer<typeof TrustIssuerRegistrationRequestSchema>;
+export type TrustRevocationRequest = z.infer<typeof TrustRevocationRequestSchema>;
+export type TrustAuditRecord = z.infer<typeof TrustAuditRecordSchema>;

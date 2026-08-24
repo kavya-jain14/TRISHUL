@@ -16,40 +16,67 @@ import {
   type TrustCapability,
   type TrustChallenge,
   type TrustChallengeRequest,
+  type TrustAuditRecord,
   type TrustSession,
   type TrustVerificationRequest,
   type TrustVerificationResult,
 } from '@trishul/contracts';
+import type { TrustRepository, StoredChallenge, StoredSession } from '@trishul/database';
 import { evaluateCredentialPolicy } from './credential-policy.js';
 
-interface IssuerRecord {
-  issuerId: string;
-  publicKeyPem: string;
-  active: boolean;
+export interface TrustVerifierAdapter {
+  verifyIssuer(
+    publicKeyPem: string,
+    claims: CredentialClaims,
+    signature: string,
+  ): boolean | Promise<boolean>;
+  verifyProof(
+    publicKeyPem: string,
+    challenge: TrustChallenge | StoredChallenge,
+    claims: CredentialClaims,
+    signature: string,
+  ): boolean | Promise<boolean>;
 }
 
-interface StoredChallenge extends TrustChallenge {
-  consumedAt: string | null;
-}
+/**
+ * PROTOCOL-COMPATIBLE DEMO VERIFIER
+ * This uses standard Ed25519 signatures to simulate the cryptographic boundary.
+ * In the future, this should be replaced with an actual anonymous PrivacyPass/ZKP verifier.
+ */
+export class DemoSignatureVerifier implements TrustVerifierAdapter {
+  verifyIssuer(publicKeyPem: string, claims: CredentialClaims, signature: string): boolean {
+    return verifyDetached(publicKeyPem, credentialSigningPayload(claims), signature);
+  }
 
-interface StoredSession {
-  credentialId: string;
-  issuerId: string;
-  session: TrustSession;
+  verifyProof(
+    publicKeyPem: string,
+    challenge: TrustChallenge | StoredChallenge,
+    claims: CredentialClaims,
+    signature: string,
+  ): boolean {
+    return verifyDetached(publicKeyPem, challengeProofPayload(challenge, claims), signature);
+  }
 }
 
 const ROLE_CAPABILITIES: Record<CredentialRole, readonly TrustCapability[]> = {
-  INVESTIGATOR: ['CASE_READ', 'CASE_WRITE', 'EVIDENCE_ANCHOR'],
-  SUPERVISOR: ['CASE_READ', 'CASE_WRITE', 'EVIDENCE_ANCHOR', 'IDENTITY_RESOLUTION', 'AUDIT_READ'],
+  INVESTIGATOR: ['CASE_READ', 'CASE_WRITE', 'EVIDENCE_ANCHOR', 'IDENTITY_RESOLUTION_REQUEST'],
+  SUPERVISOR: [
+    'CASE_READ',
+    'CASE_WRITE',
+    'EVIDENCE_ANCHOR',
+    'IDENTITY_RESOLUTION_APPROVE',
+    'AUDIT_READ',
+  ],
   AUDITOR: ['CASE_READ', 'EVIDENCE_ANCHOR', 'AUDIT_READ'],
-  LEA_OFFICER: ['CASE_READ', 'EVIDENCE_ANCHOR', 'IDENTITY_RESOLUTION'],
+  LEA_OFFICER: ['CASE_READ', 'EVIDENCE_ANCHOR', 'IDENTITY_RESOLUTION_APPROVE'],
 };
 
 const CASE_BOUND_CAPABILITIES = new Set<TrustCapability>([
   'CASE_READ',
   'CASE_WRITE',
   'EVIDENCE_ANCHOR',
-  'IDENTITY_RESOLUTION',
+  'IDENTITY_RESOLUTION_REQUEST',
+  'IDENTITY_RESOLUTION_APPROVE',
 ]);
 
 export class TrustAccessError extends Error {
@@ -64,21 +91,23 @@ export class TrustAccessError extends Error {
   }
 }
 
-export class InMemoryCredentialRegistry {
-  private readonly issuers = new Map<string, IssuerRecord>();
-  private readonly revokedCredentialIds = new Set<string>();
+export class InMemoryTrustRepository implements TrustRepository {
+  private readonly issuers = new Map<
+    string,
+    { issuerId: string; publicKeyPem: string; active: boolean }
+  >();
+  private readonly revokedCredentialIds = new Map<string, string>(); // id -> timestamp
+  private readonly challenges = new Map<string, StoredChallenge>();
+  private readonly sessions = new Map<string, StoredSession>();
+  private readonly auditRecords: TrustAuditRecord[] = [];
 
-  registerIssuer(input: { issuerId: string; publicKeyPem: string; active?: boolean }): void {
-    const issuerId = IdentifierSchema.parse(input.issuerId);
-    const publicKeyPem = PublicKeyPemSchema.parse(input.publicKeyPem);
-    this.issuers.set(issuerId, {
-      issuerId,
-      publicKeyPem,
-      active: input.active ?? true,
-    });
+  async registerIssuer(issuerId: string, publicKeyPem: string, active: boolean): Promise<void> {
+    const id = IdentifierSchema.parse(issuerId);
+    const pem = PublicKeyPemSchema.parse(publicKeyPem);
+    this.issuers.set(id, { issuerId: id, publicKeyPem: pem, active });
   }
 
-  setIssuerActive(issuerId: string, active: boolean): void {
+  async setIssuerActive(issuerId: string, active: boolean): Promise<void> {
     const id = IdentifierSchema.parse(issuerId);
     const existing = this.issuers.get(id);
     if (!existing) {
@@ -89,17 +118,54 @@ export class InMemoryCredentialRegistry {
     this.issuers.set(id, { ...existing, active });
   }
 
-  revokeCredential(credentialId: string): void {
-    this.revokedCredentialIds.add(IdentifierSchema.parse(credentialId));
+  async revokeCredential(credentialId: string, revokedAt: string): Promise<void> {
+    this.revokedCredentialIds.set(IdentifierSchema.parse(credentialId), revokedAt);
   }
 
-  isRevoked(credentialId: string): boolean {
+  async isRevoked(credentialId: string): Promise<boolean> {
     return this.revokedCredentialIds.has(credentialId);
   }
 
-  trustedIssuerPublicKey(issuerId: string): string | null {
+  async trustedIssuerPublicKey(issuerId: string): Promise<string | null> {
     const issuer = this.issuers.get(issuerId);
     return issuer?.active ? issuer.publicKeyPem : null;
+  }
+
+  async getIssuers(): Promise<{ issuerId: string; publicKeyPem: string; active: boolean }[]> {
+    return Array.from(this.issuers.values());
+  }
+
+  async getAuditRecords(): Promise<TrustAuditRecord[]> {
+    return this.auditRecords.map((record) => structuredClone(record));
+  }
+
+  async appendAuditRecord(record: TrustAuditRecord): Promise<void> {
+    this.auditRecords.push(structuredClone(record));
+  }
+
+  async saveChallenge(challenge: StoredChallenge): Promise<void> {
+    this.challenges.set(challenge.challengeId, challenge);
+  }
+
+  async getChallenge(challengeId: string): Promise<StoredChallenge | null> {
+    return this.challenges.get(challengeId) ?? null;
+  }
+
+  async consumeChallenge(challengeId: string, nonce: string, consumedAt: string): Promise<boolean> {
+    const challenge = this.challenges.get(challengeId);
+    if (challenge && challenge.nonce === nonce && challenge.consumedAt === null) {
+      challenge.consumedAt = consumedAt;
+      return true;
+    }
+    return false;
+  }
+
+  async saveSession(sessionData: StoredSession): Promise<void> {
+    this.sessions.set(sessionData.tokenDigest, sessionData);
+  }
+
+  async getSession(tokenDigest: string): Promise<StoredSession | null> {
+    return this.sessions.get(tokenDigest) ?? null;
   }
 }
 
@@ -109,21 +175,20 @@ export interface TrustAccessServiceConfig {
 }
 
 export class TrustAccessService {
-  private readonly challenges = new Map<string, StoredChallenge>();
-  private readonly sessions = new Map<string, StoredSession>();
   private readonly challengeTtlMs: number;
   private readonly sessionTtlMs: number;
 
   constructor(
-    private readonly registry: InMemoryCredentialRegistry,
+    private readonly repository: TrustRepository,
     config: TrustAccessServiceConfig = {},
     private readonly clock: () => Date = () => new Date(),
+    private readonly verifier: TrustVerifierAdapter = new DemoSignatureVerifier(),
   ) {
     this.challengeTtlMs = positiveDuration(config.challengeTtlMs ?? 120_000, 'challengeTtlMs');
     this.sessionTtlMs = positiveDuration(config.sessionTtlMs ?? 600_000, 'sessionTtlMs');
   }
 
-  createChallenge(rawRequest: TrustChallengeRequest): TrustChallenge {
+  async createChallenge(rawRequest: TrustChallengeRequest): Promise<TrustChallenge> {
     const request = TrustChallengeRequestSchema.parse(rawRequest);
     if (CASE_BOUND_CAPABILITIES.has(request.capability) && !request.caseId) {
       throw new TrustAccessError(
@@ -146,13 +211,13 @@ export class TrustAccessService {
       expiresAt: new Date(issuedAt.getTime() + this.challengeTtlMs).toISOString(),
       consumedAt: null,
     };
-    this.challenges.set(challenge.challengeId, challenge);
+    await this.repository.saveChallenge(challenge);
     return publicChallenge(challenge);
   }
 
-  verify(rawRequest: TrustVerificationRequest): TrustVerificationResult {
+  async verify(rawRequest: TrustVerificationRequest): Promise<TrustVerificationResult> {
     const request = TrustVerificationRequestSchema.parse(rawRequest);
-    const challenge = this.challenges.get(request.challengeId);
+    const challenge = await this.repository.getChallenge(request.challengeId);
     if (!challenge) {
       throw new TrustAccessError('TRUST_CHALLENGE_INVALID', 'The challenge does not exist.', 401, [
         'CHALLENGE_NOT_FOUND',
@@ -161,22 +226,25 @@ export class TrustAccessService {
 
     const now = this.clock();
     const claims = request.credential.claims;
-    const issuerPublicKey = this.registry.trustedIssuerPublicKey(claims.issuerId);
+    const issuerPublicKey = await this.repository.trustedIssuerPublicKey(claims.issuerId);
     const nonceFresh =
       challenge.consumedAt === null && now.getTime() < Date.parse(challenge.expiresAt);
     const roleMatches = ROLE_CAPABILITIES[claims.role].includes(challenge.capability);
     const purposeAllowed = claims.allowedPurposes.includes(challenge.purpose);
     const issuerSignatureValid =
       issuerPublicKey !== null &&
-      verifyDetached(
+      (await this.verifier.verifyIssuer(
         issuerPublicKey,
-        credentialSigningPayload(claims),
+        claims,
         request.credential.issuerSignature,
-      );
+      ));
+
+    const isRevoked = await this.repository.isRevoked(claims.credentialId);
+
     const policy = evaluateCredentialPolicy({
       issuerTrusted: issuerPublicKey !== null,
       signatureValid: issuerSignatureValid,
-      revoked: this.registry.isRevoked(claims.credentialId),
+      revoked: isRevoked,
       nonceFresh,
       roleMatches,
       purposeAllowed,
@@ -192,17 +260,22 @@ export class TrustAccessService {
       reasonCodes.push('CASE_SCOPE_MISMATCH');
     }
     if (
-      !verifyDetached(
+      !(await this.verifier.verifyProof(
         claims.subjectPublicKeyPem,
-        challengeProofPayload(challenge, claims),
+        challenge,
+        claims,
         request.proofSignature,
-      )
+      ))
     ) {
       reasonCodes.push('PROOF_SIGNATURE_INVALID');
     }
 
     const uniqueReasons = [...new Set(reasonCodes)];
     if (uniqueReasons.length > 0) {
+      await this.logAudit('VERIFICATION_FAILED', claims.subjectId, claims.credentialId, {
+        reasons: uniqueReasons,
+        challengeId: challenge.challengeId,
+      });
       throw new TrustAccessError(
         policy.status === 'REVOKED' ? 'CREDENTIAL_REVOKED' : 'TRUST_VERIFICATION_FAILED',
         'The credential proof did not satisfy the trust policy.',
@@ -211,7 +284,24 @@ export class TrustAccessService {
       );
     }
 
-    challenge.consumedAt = now.toISOString();
+    const consumed = await this.repository.consumeChallenge(
+      challenge.challengeId,
+      challenge.nonce,
+      now.toISOString(),
+    );
+    if (!consumed) {
+      await this.logAudit('VERIFICATION_FAILED', claims.subjectId, claims.credentialId, {
+        reasons: ['NONCE_REPLAY_OR_EXPIRED'],
+        challengeId: challenge.challengeId,
+      });
+      throw new TrustAccessError(
+        'TRUST_VERIFICATION_FAILED',
+        'The credential proof did not satisfy the trust policy.',
+        401,
+        ['NONCE_REPLAY_OR_EXPIRED'],
+      );
+    }
+
     const credentialExpiry = Date.parse(claims.expiresAt);
     const session: TrustSession = {
       sessionId: randomUUID(),
@@ -226,16 +316,26 @@ export class TrustAccessService {
       ).toISOString(),
     };
     const accessToken = randomBytes(32).toString('base64url');
-    this.sessions.set(tokenDigest(accessToken), {
+    await this.repository.saveSession({
+      tokenDigest: tokenDigest(accessToken),
       credentialId: claims.credentialId,
       issuerId: claims.issuerId,
       session,
     });
+
+    await this.logAudit('SESSION_ESTABLISHED', claims.subjectId, session.sessionId, {
+      credentialId: claims.credentialId,
+      capabilities: session.capabilities,
+    });
     return { session, accessToken, policyVersion: 'credential-policy-v1' };
   }
 
-  authorize(accessToken: string, capability: TrustCapability, caseId?: string): TrustSession {
-    const stored = this.sessions.get(tokenDigest(accessToken));
+  async authorize(
+    accessToken: string,
+    capability: TrustCapability,
+    caseId?: string,
+  ): Promise<TrustSession> {
+    const stored = await this.repository.getSession(tokenDigest(accessToken));
     if (!stored || Date.parse(stored.session.expiresAt) <= this.clock().getTime()) {
       throw new TrustAccessError(
         'TRUST_SESSION_INVALID',
@@ -244,10 +344,11 @@ export class TrustAccessService {
         ['SESSION_MISSING_OR_EXPIRED'],
       );
     }
-    if (
-      this.registry.isRevoked(stored.credentialId) ||
-      this.registry.trustedIssuerPublicKey(stored.issuerId) === null
-    ) {
+
+    const isRevoked = await this.repository.isRevoked(stored.credentialId);
+    const trustedIssuerPublicKey = await this.repository.trustedIssuerPublicKey(stored.issuerId);
+
+    if (isRevoked || trustedIssuerPublicKey === null) {
       throw new TrustAccessError(
         'CREDENTIAL_REVOKED',
         'The credential backing this session is no longer trusted.',
@@ -272,6 +373,63 @@ export class TrustAccessService {
       );
     }
     return stored.session;
+  }
+
+  // Internal governance methods. No public HTTP admin surface is exposed.
+  async registerIssuer(
+    issuerId: string,
+    publicKeyPem: string,
+    active: boolean = true,
+  ): Promise<void> {
+    await this.repository.registerIssuer(issuerId, publicKeyPem, active);
+    await this.logAudit('ISSUER_REGISTERED', 'system:governance', issuerId, { active });
+  }
+
+  async setIssuerActive(issuerId: string, active: boolean): Promise<void> {
+    await this.repository.setIssuerActive(issuerId, active);
+    await this.logAudit(
+      active ? 'ISSUER_ACTIVATED' : 'ISSUER_DEACTIVATED',
+      'system:governance',
+      issuerId,
+      {},
+    );
+  }
+
+  async revokeCredential(credentialId: string): Promise<void> {
+    const timestamp = this.clock().toISOString();
+    await this.repository.revokeCredential(credentialId, timestamp);
+    await this.logAudit('CREDENTIAL_REVOKED', 'system:governance', credentialId, {});
+  }
+
+  async getIssuers(): Promise<{ issuerId: string; publicKeyPem: string; active: boolean }[]> {
+    return this.repository.getIssuers();
+  }
+
+  async getTrustAudit(): Promise<TrustAuditRecord[]> {
+    return this.repository.getAuditRecords();
+  }
+
+  private async logAudit(
+    action: string,
+    actorId: string,
+    targetId: string | undefined,
+    details: Record<string, unknown>,
+  ) {
+    const timestamp = this.clock().toISOString();
+    const auditId = randomUUID();
+    // Simple hash for integrity
+    const hashData = JSON.stringify({ auditId, timestamp, action, actorId, targetId, details });
+    const integrityHash = createHash('sha256').update(hashData).digest('hex');
+    const record: TrustAuditRecord = {
+      auditId,
+      timestamp,
+      action,
+      actorId,
+      ...(targetId ? { targetId } : {}),
+      details,
+      integrityHash,
+    };
+    await this.repository.appendAuditRecord(record);
   }
 }
 

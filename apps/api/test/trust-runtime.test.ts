@@ -12,65 +12,77 @@ function issuer(active = true) {
 }
 
 describe('Trust/Access runtime configuration', () => {
-  it('keeps the deterministic demo optional outside production', () => {
-    const runtime = trustAccessRuntimeFromEnvironment({ NODE_ENV: 'development' });
+  it('keeps the deterministic demo optional outside production', async () => {
+    const runtime = await trustAccessRuntimeFromEnvironment({ NODE_ENV: 'development' });
 
     expect(runtime.mode).toBe('DEVELOPMENT_OPTIONAL');
     expect(runtime.enforceTrustAccess).toBe(false);
     expect(runtime.activeIssuerCount).toBe(0);
   });
 
-  it('fails closed when production enforcement or active issuers are missing', () => {
-    expect(() => trustAccessRuntimeFromEnvironment({ NODE_ENV: 'production' })).toThrow(
+  it('fails closed when production enforcement, persistence, or active issuers are missing', async () => {
+    await expect(trustAccessRuntimeFromEnvironment({ NODE_ENV: 'production' })).rejects.toThrow(
       /requires TRISHUL_TRUST_ACCESS_MODE=ENFORCED/,
     );
-    expect(() =>
+    await expect(
       trustAccessRuntimeFromEnvironment({
         NODE_ENV: 'production',
         TRISHUL_TRUST_ACCESS_MODE: 'ENFORCED',
         TRISHUL_TRUSTED_ISSUERS_JSON: '[]',
       }),
-    ).toThrow(/at least one active trusted issuer/);
-    expect(() =>
-      trustAccessRuntimeFromEnvironment({
-        NODE_ENV: 'production',
-        TRISHUL_TRUST_ACCESS_MODE: 'ENFORCED',
-        TRISHUL_TRUSTED_ISSUERS_JSON: JSON.stringify([issuer(false)]),
-      }),
-    ).toThrow(/at least one active trusted issuer/);
+    ).rejects.toThrow(/durable PostgreSQL persistence/);
+    await expect(
+      trustAccessRuntimeFromEnvironment(
+        {
+          NODE_ENV: 'production',
+          TRISHUL_TRUST_ACCESS_MODE: 'ENFORCED',
+          TRISHUL_TRUSTED_ISSUERS_JSON: JSON.stringify([issuer(false)]),
+        },
+        { durablePersistence: true },
+      ),
+    ).rejects.toThrow(/at least one active trusted issuer/);
   });
 
-  it('loads validated issuer and revocation bootstrap state for enforced mode', () => {
-    const runtime = trustAccessRuntimeFromEnvironment({
-      NODE_ENV: 'production',
-      TRISHUL_TRUST_ACCESS_MODE: 'ENFORCED',
-      TRISHUL_TRUSTED_ISSUERS_JSON: JSON.stringify([issuer()]),
-      TRISHUL_REVOKED_CREDENTIAL_IDS_JSON: JSON.stringify([
-        'credential:revoked-a',
-        'credential:revoked-a',
-      ]),
-    });
+  it('loads validated issuer and revocation bootstrap state for enforced mode', async () => {
+    const runtime = await trustAccessRuntimeFromEnvironment(
+      {
+        NODE_ENV: 'production',
+        TRISHUL_TRUST_ACCESS_MODE: 'ENFORCED',
+        TRISHUL_TRUSTED_ISSUERS_JSON: JSON.stringify([issuer()]),
+        TRISHUL_REVOKED_CREDENTIAL_IDS_JSON: JSON.stringify([
+          'credential:revoked-a',
+          'credential:revoked-a',
+        ]),
+      },
+      { durablePersistence: true },
+    );
 
     expect(runtime.enforceTrustAccess).toBe(true);
     expect(runtime.activeIssuerCount).toBe(1);
-    expect(runtime.revokedCredentialCount).toBe(1);
+    expect(runtime.bootstrapRevokedCredentialCount).toBe(1);
   });
 
-  it('rejects malformed bootstrap data without echoing it', () => {
+  it('rejects malformed bootstrap data without echoing it', async () => {
     const secretLikeInvalidValue = 'do-not-echo-this';
-    expect(() =>
-      trustAccessRuntimeFromEnvironment({
-        NODE_ENV: 'production',
-        TRISHUL_TRUST_ACCESS_MODE: 'ENFORCED',
-        TRISHUL_TRUSTED_ISSUERS_JSON: secretLikeInvalidValue,
-      }),
-    ).toThrow('TRISHUL_TRUSTED_ISSUERS_JSON must contain valid JSON.');
+    await expect(
+      trustAccessRuntimeFromEnvironment(
+        {
+          NODE_ENV: 'production',
+          TRISHUL_TRUST_ACCESS_MODE: 'ENFORCED',
+          TRISHUL_TRUSTED_ISSUERS_JSON: secretLikeInvalidValue,
+        },
+        { durablePersistence: true },
+      ),
+    ).rejects.toThrow('TRISHUL_TRUSTED_ISSUERS_JSON must contain valid JSON.');
     try {
-      trustAccessRuntimeFromEnvironment({
-        NODE_ENV: 'production',
-        TRISHUL_TRUST_ACCESS_MODE: 'ENFORCED',
-        TRISHUL_TRUSTED_ISSUERS_JSON: secretLikeInvalidValue,
-      });
+      await trustAccessRuntimeFromEnvironment(
+        {
+          NODE_ENV: 'production',
+          TRISHUL_TRUST_ACCESS_MODE: 'ENFORCED',
+          TRISHUL_TRUSTED_ISSUERS_JSON: secretLikeInvalidValue,
+        },
+        { durablePersistence: true },
+      );
     } catch (error) {
       expect(String(error)).not.toContain(secretLikeInvalidValue);
     }

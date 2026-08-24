@@ -10,7 +10,7 @@ import { InMemoryCaseActionRepository } from '@trishul/database';
 import {
   challengeProofPayload,
   credentialSigningPayload,
-  InMemoryCredentialRegistry,
+  InMemoryTrustRepository,
   TrustAccessService,
 } from '@trishul/trust';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -61,9 +61,9 @@ function signature(privateKey: KeyObject, payload: string): string {
 
 async function fixture() {
   const issuer = keyPair();
-  const registry = new InMemoryCredentialRegistry();
-  registry.registerIssuer({ issuerId: 'issuer:case-actions', publicKeyPem: issuer.publicKeyPem });
-  const trust = new TrustAccessService(registry, {}, () => new Date(now));
+  const repository = new InMemoryTrustRepository();
+  const trust = new TrustAccessService(repository, {}, () => new Date(now));
+  await trust.registerIssuer('issuer:case-actions', issuer.publicKeyPem);
   const caseService = new CaseService(new InMemoryCaseRepository());
   const evidence = new EvidenceAnchorService(
     new InMemoryEvidenceAnchorRepository(),
@@ -99,7 +99,7 @@ async function fixture() {
   return { app, issuer, trust, evidence, validAction };
 }
 
-function accessToken(
+async function accessToken(
   trust: TrustAccessService,
   issuerPrivateKey: KeyObject,
   input: {
@@ -108,13 +108,13 @@ function accessToken(
     caseId?: string;
     subjectId?: string;
   } = {},
-): string {
+): Promise<string> {
   const subject = keyPair();
   const role = input.role ?? 'INVESTIGATOR';
   const capability = input.capability ?? 'CASE_WRITE';
   const caseId = input.caseId ?? 'case:complaint-action-a';
   const subjectId = input.subjectId ?? `investigator:${role.toLowerCase()}`;
-  const challenge = trust.createChallenge({
+  const challenge = await trust.createChallenge({
     subjectId,
     capability,
     purpose: 'FRAUD_INVESTIGATION',
@@ -136,11 +136,13 @@ function accessToken(
     claims,
     issuerSignature: signature(issuerPrivateKey, credentialSigningPayload(claims)),
   };
-  return trust.verify({
-    challengeId: challenge.challengeId,
-    credential,
-    proofSignature: signature(subject.privateKey, challengeProofPayload(challenge, claims)),
-  }).accessToken;
+  return (
+    await trust.verify({
+      challengeId: challenge.challengeId,
+      credential,
+      proofSignature: signature(subject.privateKey, challengeProofPayload(challenge, claims)),
+    })
+  ).accessToken;
 }
 
 function bearer(token: string) {
@@ -150,8 +152,10 @@ function bearer(token: string) {
 describe('secure case action persistence API', () => {
   it('derives actor and purpose from a verified session, then replays immutably', async () => {
     const { app, issuer, trust, validAction } = await fixture();
-    const writeToken = accessToken(trust, issuer.privateKey, { subjectId: 'investigator:fuzail' });
-    const readToken = accessToken(trust, issuer.privateKey, {
+    const writeToken = await accessToken(trust, issuer.privateKey, {
+      subjectId: 'investigator:fuzail',
+    });
+    const readToken = await accessToken(trust, issuer.privateKey, {
       subjectId: 'investigator:fuzail',
       capability: 'CASE_READ',
     });
@@ -192,8 +196,8 @@ describe('secure case action persistence API', () => {
 
   it('rejects missing/forged sessions, wrong cases, and insufficient capability', async () => {
     const { app, issuer, trust, validAction } = await fixture();
-    const wrongCase = accessToken(trust, issuer.privateKey, { caseId: 'case:other' });
-    const readOnly = accessToken(trust, issuer.privateKey, { capability: 'CASE_READ' });
+    const wrongCase = await accessToken(trust, issuer.privateKey, { caseId: 'case:other' });
+    const readOnly = await accessToken(trust, issuer.privateKey, { capability: 'CASE_READ' });
     const request = (token?: string) =>
       app.inject({
         method: 'POST',
@@ -210,7 +214,7 @@ describe('secure case action persistence API', () => {
 
   it('enforces action-specific roles and keeps outcomes non-authoritative', async () => {
     const { app, issuer, trust, validAction } = await fixture();
-    const investigator = accessToken(trust, issuer.privateKey);
+    const investigator = await accessToken(trust, issuer.privateKey);
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/cases/case:complaint-action-a/actions',
@@ -231,7 +235,7 @@ describe('secure case action persistence API', () => {
 
   it('rejects client identity assertions and unverified or cross-case evidence', async () => {
     const { app, issuer, trust, evidence, validAction } = await fixture();
-    const token = accessToken(trust, issuer.privateKey);
+    const token = await accessToken(trust, issuer.privateKey);
     const assertedIdentity = await app.inject({
       method: 'POST',
       url: '/api/v1/cases/case:complaint-action-a/actions',

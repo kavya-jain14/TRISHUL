@@ -17,6 +17,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@trishul/contracts": "*"
+    "@trishul/contracts": "*",
+    "@trishul/database": "^0.1.0"
   }
 }
