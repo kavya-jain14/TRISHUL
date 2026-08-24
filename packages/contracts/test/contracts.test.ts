@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CaseActionRequestSchema,
   ForecastSnapshotSchema,
   ExitModeRequestSchema,
   GraphEdgeSchema,
@@ -19,6 +20,30 @@ const provenance = {
 } as const;
 
 describe('shared contracts', () => {
+  it('requires attributable case-action evidence', () => {
+    expect(
+      CaseActionRequestSchema.safeParse({
+        actionId: 'action-1',
+        action: 'ALERT_BANK',
+        actorRef: 'analyst-fuzail',
+        purpose: 'Fraud response',
+        rationale: 'Provider review is required.',
+        sourceUrls: ['https://example.test/evidence/1'],
+        occurredAt: '2026-08-24T10:00:00.000Z',
+      }).success,
+    ).toBe(true);
+    expect(
+      CaseActionRequestSchema.safeParse({
+        actionId: 'action-2',
+        action: 'ALERT_BANK',
+        actorRef: 'analyst-fuzail',
+        purpose: 'Fraud response',
+        rationale: 'Unsupported action.',
+        sourceUrls: [],
+        occurredAt: '2026-08-24T10:00:00.000Z',
+      }).success,
+    ).toBe(false);
+  });
   it('accepts a provenance-backed provider transfer', () => {
     const result = ProviderEventSchema.safeParse({
       eventId: 'evt-transfer-1',

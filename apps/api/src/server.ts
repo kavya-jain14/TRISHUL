@@ -1,9 +1,11 @@
 import { Pool } from 'pg';
+import { InMemoryCaseActionRepository, PostgresCaseActionRepository } from '@trishul/database';
 import { DevelopmentHashchainProvider } from '@trishul/audit';
 import { buildApp } from './app.js';
 import { InMemoryCaseRepository } from './modules/cases/case-repository.js';
 import { CaseService } from './modules/cases/case-service.js';
 import { PostgresCaseRepository } from './modules/cases/postgres-case-repository.js';
+import { CaseActionService } from './modules/case-actions/service.js';
 import { InMemoryEvidenceAnchorRepository } from './modules/evidence-anchors/anchor-repository.js';
 import { EvidenceAnchorService } from './modules/evidence-anchors/anchor-service.js';
 import { PostgresEvidenceAnchorRepository } from './modules/evidence-anchors/postgres-anchor-repository.js';
@@ -15,12 +17,18 @@ const pool = process.env.DATABASE_URL
   : null;
 const repository = pool ? new PostgresCaseRepository(pool) : new InMemoryCaseRepository();
 const caseService = new CaseService(repository);
+const actionRepository = pool
+  ? new PostgresCaseActionRepository(pool)
+  : new InMemoryCaseActionRepository();
 const anchorRepository = pool
   ? new PostgresEvidenceAnchorRepository(pool)
   : new InMemoryEvidenceAnchorRepository();
 const app = buildApp({
   logger: true,
   caseService,
+  caseActionService: new CaseActionService(actionRepository, (caseId) =>
+    caseService.getCase(caseId),
+  ),
   evidenceAnchorService: new EvidenceAnchorService(
     anchorRepository,
     new DevelopmentHashchainProvider(),

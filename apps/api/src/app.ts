@@ -3,6 +3,9 @@ import { DevelopmentHashchainProvider } from '@trishul/audit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { DomainError } from './domain/errors.js';
+import { InMemoryCaseActionRepository } from '@trishul/database';
+import { registerCaseActionRoutes } from './modules/case-actions/routes.js';
+import { CaseActionService } from './modules/case-actions/service.js';
 import { InMemoryCaseRepository } from './modules/cases/case-repository.js';
 import { CaseService } from './modules/cases/case-service.js';
 import { registerCaseRoutes } from './modules/cases/routes.js';
@@ -14,6 +17,7 @@ export interface BuildAppOptions {
   logger?: boolean;
   caseService?: CaseService;
   evidenceAnchorService?: EvidenceAnchorService;
+  caseActionService?: CaseActionService;
   persistenceMode?: 'IN_MEMORY_DEVELOPMENT_ADAPTER' | 'POSTGRESQL';
 }
 
@@ -33,7 +37,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       new DevelopmentHashchainProvider(),
       (caseId) => caseService.getCase(caseId),
     );
+  const caseActionService =
+    options.caseActionService ??
+    new CaseActionService(new InMemoryCaseActionRepository(), (caseId) =>
+      caseService.getCase(caseId),
+    );
   registerCaseRoutes(app, caseService);
+  registerCaseActionRoutes(app, caseActionService);
   registerEvidenceAnchorRoutes(app, evidenceAnchorService);
 
   app.get('/api/v1/health', async () => ({
@@ -69,6 +79,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       'TOP_K_GEO_FORECAST',
       'TIME_HORIZON_FORECAST',
       'VERSIONED_REFORECAST',
+      'DURABLE_CASE_ACTION_EVENTS',
       'PII_FREE_EVIDENCE_ANCHORING',
       'TAMPER_EVIDENT_VERIFICATION',
       'REPLACEABLE_BLOCKCHAIN_PROVIDER',

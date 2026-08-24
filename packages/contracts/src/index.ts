@@ -1,4 +1,5 @@
 export * from './alerts.js';
+export * from './case-actions.js';
 export * from './cases.js';
 export * from './common.js';
 export * from './evidence-anchor.js';
