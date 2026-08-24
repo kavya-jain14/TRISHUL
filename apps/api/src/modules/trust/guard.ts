@@ -15,14 +15,18 @@ export function registerTrustAccessGuard(app: FastifyInstance, service: TrustAcc
           : path.includes('/evidence-anchors')
             ? 'EVIDENCE_ANCHOR'
             : 'CASE_WRITE';
-      service.authorize(bearerToken(request), capability, id);
+      const session = await service.authorize(bearerToken(request), capability, id);
+      // @ts-expect-error - Attach session to request for downstream handlers
+      request.trustSession = session;
       return;
     }
 
     if (request.method === 'POST' && path.startsWith('/api/v1/accounts/')) {
       const body = request.body as { caseId?: unknown } | null;
       const id = IdentifierSchema.parse(body?.caseId);
-      service.authorize(bearerToken(request), 'CASE_WRITE', id);
+      const session = await service.authorize(bearerToken(request), 'CASE_WRITE', id);
+      // @ts-expect-error - Attach session to request for downstream handlers
+      request.trustSession = session;
     }
   });
 }

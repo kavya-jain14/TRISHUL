@@ -3,7 +3,7 @@ import type { CredentialClaims, SignedCredential, TrustChallenge } from '@trishu
 import {
   challengeProofPayload,
   credentialSigningPayload,
-  InMemoryCredentialRegistry,
+  InMemoryTrustRepository,
   TrustAccessService,
 } from '@trishul/trust';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -38,10 +38,11 @@ describe('canonical Trust/Access HTTP flow', () => {
   it('protects the case surface with a signed, subject-bound, case-scoped session', async () => {
     const issuer = keyPair();
     const subject = keyPair();
-    const registry = new InMemoryCredentialRegistry();
-    registry.registerIssuer({ issuerId: 'issuer:bank-a', publicKeyPem: issuer.publicKeyPem });
+    const registry = new InMemoryTrustRepository();
+    registry.registerIssuer('issuer:bank-a', issuer.publicKeyPem, true);
     const trustAccessService = new TrustAccessService(
       registry,
+      undefined,
       {},
       () => new Date('2026-08-24T12:00:00.000Z'),
     );
