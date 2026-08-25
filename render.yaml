@@ -1,0 +1,46 @@
+databases:
+  - name: trishul-demo-db
+    databaseName: trishul
+    user: trishul
+    plan: free
+
+services:
+  - type: web
+    name: trishul-demo-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build:packages && npm run build --workspace @trishul/api
+    startCommand: npm run db:migrate && npm run start --workspace @trishul/api
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: development
+      - key: NODE_VERSION
+        value: 24.14.1
+      - key: DATABASE_URL
+        fromDatabase:
+          name: trishul-demo-db
+          property: connectionString
+      - key: TRISHUL_TRUST_ACCESS_MODE
+        value: DEVELOPMENT_OPTIONAL
+      - key: EVIDENCE_ANCHOR_MODE
+        value: DEVELOPMENT_HASHCHAIN
+      - key: TRISHUL_DEMO_PROFILE
+        value: GOLDEN_SYNTHETIC
+      - key: TRISHUL_CORS_ORIGINS
+        value: '*'
+
+  - type: web
+    name: trishul-demo-psp-sandbox
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build:packages && npm run build --workspace @trishul/psp-sandbox
+    startCommand: npm run start --workspace @trishul/psp-sandbox
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: development
+      - key: NODE_VERSION
+        value: 24.14.1
+      - key: TRISHUL_CORS_ORIGINS
+        value: '*'
