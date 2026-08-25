@@ -31,8 +31,9 @@ import { PaymentRiskService } from './modules/payment-risk/service.js';
 import { CrossCaseCorrelationService } from './modules/network-memory/service.js';
 import { CommandCenterService } from './modules/command-center/service.js';
 
-const port = Number.parseInt(process.env.API_PORT ?? '4000', 10);
+const port = Number.parseInt(process.env.PORT ?? process.env.API_PORT ?? '4000', 10);
 const host = process.env.API_HOST ?? '0.0.0.0';
+const syntheticDemoCaseIds = syntheticDemoCaseIdsFromEnvironment(process.env);
 const pool = process.env.DATABASE_URL
   ? new Pool({ connectionString: process.env.DATABASE_URL })
   : null;
@@ -102,6 +103,8 @@ const app = buildApp({
   enforcePaymentRiskServiceToken,
   ...(paymentRiskServiceToken ? { paymentRiskServiceToken } : {}),
   persistenceMode: pool ? 'POSTGRESQL' : 'IN_MEMORY_DEVELOPMENT_ADAPTER',
+  corsOrigins: corsOriginsFromEnvironment(process.env),
+  ...(syntheticDemoCaseIds.length ? { syntheticDemoCaseIds } : {}),
 });
 
 if (pool) {
@@ -113,4 +116,34 @@ try {
 } catch (error) {
   app.log.error(error);
   process.exitCode = 1;
+}
+
+function syntheticDemoCaseIdsFromEnvironment(environment: NodeJS.ProcessEnv): string[] {
+  const profile = environment.TRISHUL_DEMO_PROFILE ?? 'DISABLED';
+  if (profile === 'DISABLED') return [];
+  if (profile !== 'GOLDEN_SYNTHETIC') {
+    throw new Error(`Unsupported TRISHUL_DEMO_PROFILE: ${profile}`);
+  }
+  if (environment.NODE_ENV === 'production') {
+    throw new Error('The GOLDEN_SYNTHETIC demo profile cannot run with NODE_ENV=production.');
+  }
+  return ['case:complaint-golden-a', 'case:complaint-golden-b'];
+}
+
+function corsOriginsFromEnvironment(environment: NodeJS.ProcessEnv): true | string[] {
+  const raw = environment.TRISHUL_CORS_ORIGINS?.trim();
+  if (!raw || raw === '*') {
+    if (environment.NODE_ENV === 'production') {
+      throw new Error('Production requires explicit TRISHUL_CORS_ORIGINS.');
+    }
+    return true;
+  }
+  return raw.split(',').map((value) => {
+    const origin = value.trim().replace(/\/$/, '');
+    const parsed = new URL(origin);
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.origin !== origin) {
+      throw new Error('TRISHUL_CORS_ORIGINS must contain comma-separated HTTP(S) origins.');
+    }
+    return origin;
+  });
 }
