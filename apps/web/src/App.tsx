@@ -5,6 +5,7 @@ import type {
   EvidenceDimensionDecision,
   EvidenceGateSnapshot,
   ExitModeSnapshot,
+  ForecastSnapshot,
   GraphEdge,
   GraphSnapshot,
   MuleAssessmentSnapshot,
@@ -521,6 +522,125 @@ function GateCard({
   );
 }
 
+function formatTimeBucket(bucket: string) {
+  return (
+    {
+      UNDER_30_MIN: 'Under 30 min',
+      '30_TO_60_MIN': '30–60 min',
+      '1_TO_2_HOURS': '1–2 hours',
+      '2_TO_6_HOURS': '2–6 hours',
+      '6_TO_24_HOURS': '6–24 hours',
+    }[bucket] ?? bucket.replaceAll('_', ' ')
+  );
+}
+
+function ForecastPanel({ forecast }: { forecast: ForecastSnapshot }) {
+  return (
+    <section className="forecast-output">
+      <div className="forecast-heading">
+        <div>
+          <span className="section-label">Evidence-gated Phase 4 output</span>
+          <h3>Zone and time forecast</h3>
+          <p>Bounded operational intelligence only—no exact ATM, exact minute, or intent claim.</p>
+        </div>
+        <div className="forecast-confidence">
+          <span>Confidence</span>
+          <strong>{Math.round(forecast.confidence * 100)}%</strong>
+          <small>graph v{forecast.graphVersion}</small>
+        </div>
+      </div>
+
+      <div className="forecast-grid">
+        <article className="forecast-dimension">
+          <div className="forecast-dimension-heading">
+            <div>
+              <span className="section-label">Probable cash-out geography</span>
+              <h4>{forecast.geo.decision === 'PREDICT' ? 'Top zones' : 'Geo withheld'}</h4>
+            </div>
+            <span className={`forecast-decision ${forecast.geo.decision.toLowerCase()}`}>
+              {forecast.geo.decision}
+            </span>
+          </div>
+          {forecast.geo.decision === 'PREDICT' ? (
+            <div className="forecast-ranking">
+              {forecast.geo.candidates.map((candidate, index) => (
+                <div className="forecast-row" key={candidate.zoneId}>
+                  <span>{String(index + 1).padStart(2, '0')}</span>
+                  <div>
+                    <strong>{candidate.label}</strong>
+                    <small>{candidate.reasonCodes.join(' / ').replaceAll('_', ' ')}</small>
+                    <span className="probability-track">
+                      <span style={{ width: `${candidate.probability * 100}%` }} />
+                    </span>
+                  </div>
+                  <strong>{Math.round(candidate.probability * 100)}%</strong>
+                </div>
+              ))}
+              <div className="forecast-other">
+                <span>All other observed zones</span>
+                <strong>{Math.round(forecast.geo.otherProbability * 100)}%</strong>
+              </div>
+            </div>
+          ) : (
+            <div className="forecast-abstention">
+              <strong>Location prediction intentionally withheld</strong>
+              <p>{forecast.geo.reasonCodes.join(' / ').replaceAll('_', ' ')}</p>
+            </div>
+          )}
+        </article>
+
+        <article className="forecast-dimension">
+          <div className="forecast-dimension-heading">
+            <div>
+              <span className="section-label">Bounded time-to-event</span>
+              <h4>
+                {forecast.time.decision === 'PREDICT'
+                  ? formatTimeBucket(forecast.time.highestRiskBucket)
+                  : 'Time withheld'}
+              </h4>
+            </div>
+            <span className={`forecast-decision ${forecast.time.decision.toLowerCase()}`}>
+              {forecast.time.decision}
+            </span>
+          </div>
+          {forecast.time.decision === 'PREDICT' ? (
+            <div className="forecast-ranking">
+              {forecast.time.horizons.map((horizon, index) => (
+                <div className="forecast-row" key={horizon.bucket}>
+                  <span>{String(index + 1).padStart(2, '0')}</span>
+                  <div>
+                    <strong>{formatTimeBucket(horizon.bucket)}</strong>
+                    <small>{horizon.reasonCodes.join(' / ').replaceAll('_', ' ')}</small>
+                    <span className="probability-track">
+                      <span style={{ width: `${horizon.probability * 100}%` }} />
+                    </span>
+                  </div>
+                  <strong>{Math.round(horizon.probability * 100)}%</strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="forecast-abstention">
+              <strong>Time prediction intentionally withheld</strong>
+              <p>{forecast.time.reasonCodes.join(' / ').replaceAll('_', ' ')}</p>
+            </div>
+          )}
+        </article>
+      </div>
+
+      <div className="forecast-lineage">
+        <span>
+          {forecast.previousPredictionRunId
+            ? `Reforecast from ${forecast.previousPredictionRunId}`
+            : 'Initial forecast for this case'}
+        </span>
+        <span>{forecast.modelVersion}</span>
+        <span>{forecast.ruleVersion}</span>
+      </div>
+    </section>
+  );
+}
+
 function PredictionWorkspace({ apiBase }: { apiBase: string }) {
   const [caseId, setCaseId] = useState('case:complaint-golden-a');
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
@@ -528,6 +648,8 @@ function PredictionWorkspace({ apiBase }: { apiBase: string }) {
   const [exitModePending, setExitModePending] = useState(false);
   const [evidenceGate, setEvidenceGate] = useState<EvidenceGateSnapshot | null>(null);
   const [evidenceGatePending, setEvidenceGatePending] = useState(false);
+  const [forecast, setForecast] = useState<ForecastSnapshot | null>(null);
+  const [forecastPending, setForecastPending] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [demoProgress, setDemoProgress] = useState('');
@@ -542,13 +664,17 @@ function PredictionWorkspace({ apiBase }: { apiBase: string }) {
       setExitModePending(result.exitModePending);
       setEvidenceGate(result.evidenceGate);
       setEvidenceGatePending(result.evidenceGatePending);
+      setForecast(result.forecast);
+      setForecastPending(result.forecastPending);
       setLoadState('ready');
     } catch (error) {
       setCaseDetail(null);
       setExitMode(null);
       setEvidenceGate(null);
+      setForecast(null);
       setExitModePending(false);
       setEvidenceGatePending(false);
+      setForecastPending(false);
       setLoadState('error');
       setErrorMessage(
         error instanceof ApiError
@@ -581,7 +707,7 @@ function PredictionWorkspace({ apiBase }: { apiBase: string }) {
       <div className="case-toolbar">
         <div>
           <span className="section-label">Evidence-gated forecasting</span>
-          <h2>Exit Mode and Forecast Readiness</h2>
+          <h2>Exit Mode and Operational Forecast</h2>
           <p>
             First rank stationary, forwarding, or likely cash-out. Geo and time unlock only when
             their own evidence is sufficient.
@@ -606,7 +732,7 @@ function PredictionWorkspace({ apiBase }: { apiBase: string }) {
               onClick={() => void runDemo('supported')}
               type="button"
             >
-              Run supported gate
+              Run supported forecast
             </button>
             <button
               className="secondary-action"
@@ -660,8 +786,8 @@ function PredictionWorkspace({ apiBase }: { apiBase: string }) {
               <strong>{exitMode?.accountId ?? 'Pending'}</strong>
             </article>
             <article>
-              <span>Overall readiness</span>
-              <strong>{evidenceGate?.overallDecision ?? 'Pending'}</strong>
+              <span>Forecast output</span>
+              <strong>{forecast ? 'CURRENT' : (evidenceGate?.overallDecision ?? 'Pending')}</strong>
             </article>
           </div>
 
@@ -732,11 +858,22 @@ function PredictionWorkspace({ apiBase }: { apiBase: string }) {
                 <p>
                   {exitMode.selectedMode === 'STATIONARY'
                     ? 'No geo or time forecast is forced from stationary funds.'
-                    : 'Phase 3 stops at readiness. Zone ranking, maps, and time horizons arrive only with the Phase 4 ranker.'}
+                    : forecast
+                      ? 'Only bounded zone and time probabilities are emitted; exact endpoint claims remain prohibited.'
+                      : 'The Evidence Gate is ready; the current graph still needs a versioned forecast run.'}
                 </p>
               </div>
             </>
           )}
+
+          {forecastPending && evidenceGate && (
+            <div className="intentional-state pending-state">
+              <strong>Forecast has not been ranked for this graph version</strong>
+              <p>The current Evidence Gate remains visible, but stale outputs are never reused.</p>
+            </div>
+          )}
+
+          {forecast && <ForecastPanel forecast={forecast} />}
         </>
       )}
     </section>
@@ -749,12 +886,13 @@ function CommandCenter({ manifest }: { manifest: SystemManifest | null }) {
       <section className="intro-panel">
         <div>
           <span className="section-label">Current checkpoint</span>
-          <h2>Exit mode and forecast evidence are now gated.</h2>
+          <h2>Complaint-to-forecast intelligence is live.</h2>
           <p>
             Provider events are accepted through strict contracts, replayed safely, ordered by
             financial time, converted into a versioned graph, and evaluated as ranges and
             explainable multi-signal risk. Exit mode is ranked first; geo and time readiness are
-            evaluated independently and may intentionally abstain.
+            evaluated independently, ranked into bounded zones and time horizons, and may
+            intentionally abstain.
           </p>
         </div>
         <div className="phase-stamp">
@@ -777,7 +915,7 @@ function CommandCenter({ manifest }: { manifest: SystemManifest | null }) {
           <div className="card-heading">
             <div>
               <span className="section-label">Live vertical slice</span>
-              <h3>Complaint to forecast readiness</h3>
+              <h3>Complaint to operational forecast</h3>
             </div>
             <span className="priority">P0</span>
           </div>
@@ -788,6 +926,7 @@ function CommandCenter({ manifest }: { manifest: SystemManifest | null }) {
             <li>TRACE returns a versioned graph and explicit visibility boundary</li>
             <li>Exposure and risk stay versioned, explainable, and provenance-backed</li>
             <li>Exit mode precedes independent geo and time Evidence Gates</li>
+            <li>Top zones and bounded time horizons persist against the current graph version</li>
           </ol>
         </article>
 

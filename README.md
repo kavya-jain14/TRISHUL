@@ -54,6 +54,16 @@ npm run dev:psp
 npm run dev:web
 ```
 
+For the deterministic three-service presentation setup:
+
+```bash
+npm run demo:smoke
+npm run dev:demo
+```
+
+See [docs/PRESENTATION_RUNBOOK.md](docs/PRESENTATION_RUNBOOK.md) for the exact judge flow and offline
+recovery steps.
+
 Run the verification suite:
 
 ```bash
