@@ -229,4 +229,31 @@ describe('TrustAccessService', () => {
       expect.objectContaining<Partial<TrustAccessError>>({ code: 'CASE_SCOPE_REQUIRED' }),
     );
   });
+
+  it('preserves credential case scopes for a non-case command-center session', async () => {
+    const { service, subject, issuer, claims } = fixture();
+    const commandClaims: CredentialClaims = {
+      ...claims,
+      capabilities: ['COMMAND_CENTER_READ'],
+      caseIds: ['case:alpha', 'case:beta'],
+    };
+    const challenge = await service.createChallenge({
+      subjectId: commandClaims.subjectId,
+      capability: 'COMMAND_CENTER_READ',
+      purpose: 'FRAUD_INVESTIGATION',
+    });
+    const result = await service.verify({
+      challengeId: challenge.challengeId,
+      credential: signedCredential(commandClaims, issuer.privateKey),
+      proofSignature: proof(challenge, commandClaims, subject.privateKey),
+    });
+
+    expect(result.session).toMatchObject({
+      capabilities: ['COMMAND_CENTER_READ'],
+      caseIds: ['case:alpha', 'case:beta'],
+    });
+    expect(await service.authorize(result.accessToken, 'COMMAND_CENTER_READ')).toEqual(
+      result.session,
+    );
+  });
 });

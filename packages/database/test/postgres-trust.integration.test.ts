@@ -55,6 +55,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL Trust and identity persistence', () =>
           capabilities: ['CASE_READ'],
           purpose: 'FRAUD_INVESTIGATION',
           caseId: 'case:postgres-trust',
+          caseIds: ['case:postgres-trust'],
           issuedAt: '2026-08-25T08:01:00.000Z',
           expiresAt: '2026-08-25T08:31:00.000Z',
         },
@@ -129,11 +130,13 @@ async function isolatedDatabase(connectionString: string) {
   const adminPool = new Pool({ connectionString, max: 1 });
   await adminPool.query(`CREATE SCHEMA "${schema}"`);
   const pool = new Pool({ connectionString, max: 4, options: `-c search_path=${schema}` });
-  const migration = await readFile(
-    new URL('../migrations/006_trust_persistence.sql', import.meta.url),
-    'utf8',
-  );
-  await pool.query(migration);
+  for (const migrationFile of ['006_trust_persistence.sql', '009_trust_command_center_scope.sql']) {
+    const migration = await readFile(
+      new URL(`../migrations/${migrationFile}`, import.meta.url),
+      'utf8',
+    );
+    await pool.query(migration);
+  }
   return { adminPool, pool, schema };
 }
 
