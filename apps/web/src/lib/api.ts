@@ -4,12 +4,14 @@ import {
   EvidenceGateSnapshotSchema,
   ExitModeSnapshotSchema,
   ExposureSnapshotSchema,
+  ForecastSnapshotSchema,
   GraphSnapshotSchema,
   type ExposureSnapshot,
   ProviderEventSchema,
   type CaseDetail,
   type EvidenceGateSnapshot,
   type ExitModeSnapshot,
+  type ForecastSnapshot,
   type GraphSnapshot,
   type MuleAssessmentSnapshot,
   type ProviderEvent,
@@ -44,6 +46,10 @@ interface ExitModeResponse {
 
 interface EvidenceGateResponse {
   evidenceGate: EvidenceGateSnapshot;
+}
+
+interface ForecastResponse {
+  forecast: ForecastSnapshot;
 }
 
 interface SandboxStep {
@@ -90,6 +96,8 @@ export interface PredictionReadinessResult {
   exitModePending: boolean;
   evidenceGate: EvidenceGateSnapshot | null;
   evidenceGatePending: boolean;
+  forecast: ForecastSnapshot | null;
+  forecastPending: boolean;
 }
 
 export async function loadCaseIntelligence(
@@ -161,6 +169,8 @@ export async function loadPredictionReadiness(
   let exitModePending = false;
   let evidenceGate: EvidenceGateSnapshot | null = null;
   let evidenceGatePending = false;
+  let forecast: ForecastSnapshot | null = null;
+  let forecastPending = false;
 
   try {
     const response = await requestJson<ExitModeResponse>(
@@ -188,7 +198,28 @@ export async function loadPredictionReadiness(
     }
   }
 
-  return { caseDetail, exitMode, exitModePending, evidenceGate, evidenceGatePending };
+  try {
+    const response = await requestJson<ForecastResponse>(
+      `${apiBase}/cases/${encodeURIComponent(caseId)}/predictions/latest`,
+    );
+    forecast = ForecastSnapshotSchema.parse(response.forecast);
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'FORECAST_NOT_AVAILABLE') {
+      forecastPending = true;
+    } else {
+      throw error;
+    }
+  }
+
+  return {
+    caseDetail,
+    exitMode,
+    exitModePending,
+    evidenceGate,
+    evidenceGatePending,
+    forecast,
+    forecastPending,
+  };
 }
 
 const goldenComplaint = {
@@ -385,16 +416,62 @@ export async function runGoldenTraceDemo(
         provenance: simulatorProvenance('gate-geo-acct-e-v1', '2026-08-24T11:31:04.000Z'),
       },
       time: {
-        sameAccountHistory: 0.18,
-        connectedNetworkHistory: 0.22,
-        graphConfidence: 0.55,
-        historicalSupport: 0.32,
-        predictionStability: 0.45,
+        sameAccountHistory: 0.86,
+        connectedNetworkHistory: 0.8,
+        graphConfidence: 0.9,
+        historicalSupport: 0.82,
+        predictionStability: 0.81,
         provenance: simulatorProvenance('gate-time-acct-e-v1', '2026-08-24T11:31:04.000Z'),
       },
     }),
   });
-  onProgress('Exit mode and Evidence Gate ready');
+  const zoneCandidate = (zoneId: string, label: string, score: number, sourceEventId: string) => ({
+    zoneId,
+    label,
+    features: {
+      accountHistory: score,
+      networkHistory: Math.max(0, score - 0.05),
+      recency: Math.max(0, score - 0.1),
+      timeSimilarity: Math.max(0, score - 0.08),
+      amountSimilarity: Math.max(0, score - 0.12),
+    },
+    provenance: simulatorProvenance(sourceEventId, '2026-08-24T11:31:05.000Z'),
+  });
+  const timeHorizon = (bucket: string, score: number) => ({
+    bucket,
+    features: {
+      sameAccountDelayHistory: score,
+      networkDelayHistory: score,
+      amountSimilarity: score,
+      velocityAlignment: score,
+      temporalPattern: score,
+      hopDepthSupport: score,
+      similarCaseTiming: score,
+    },
+    provenance: simulatorProvenance(`time-${bucket}-acct-e-v1`, '2026-08-24T11:31:05.000Z'),
+  });
+  onProgress('Ranking top zones and bounded time horizons');
+  await requestJson(`${apiBase}/cases/${encodeURIComponent(caseId)}/predictions`, {
+    method: 'POST',
+    idempotencyKey: 'demo:prediction:golden-a:v1',
+    body: JSON.stringify({
+      accountId: 'acct-e',
+      geoCandidates: [
+        zoneCandidate('zone-noida-sector-62', 'Noida Sector 62', 0.94, 'zone-noida-v1'),
+        zoneCandidate('zone-delhi-east', 'Delhi East', 0.72, 'zone-delhi-v1'),
+        zoneCandidate('zone-ghaziabad', 'Ghaziabad', 0.54, 'zone-ghaziabad-v1'),
+        zoneCandidate('zone-gurugram', 'Gurugram', 0.31, 'zone-gurugram-v1'),
+      ],
+      timeHorizons: [
+        timeHorizon('UNDER_30_MIN', 0.36),
+        timeHorizon('30_TO_60_MIN', 0.58),
+        timeHorizon('1_TO_2_HOURS', 0.91),
+        timeHorizon('2_TO_6_HOURS', 0.63),
+        timeHorizon('6_TO_24_HOURS', 0.24),
+      ],
+    }),
+  });
+  onProgress('Evidence-gated zone and time forecast ready');
   return caseId;
 }
 
@@ -489,6 +566,12 @@ export async function runStationaryGateDemo(
       time: strongDimension('time'),
     }),
   });
-  onProgress('Stationary funds retained; intentional abstention ready');
+  onProgress('Persisting explicit geo and time abstention');
+  await requestJson(`${apiBase}/cases/${encodeURIComponent(caseId)}/predictions`, {
+    method: 'POST',
+    idempotencyKey: 'demo:prediction:golden-b:v1',
+    body: JSON.stringify({ accountId: 'acct-x', geoCandidates: [], timeHorizons: [] }),
+  });
+  onProgress('Stationary funds retained; explicit forecast abstention ready');
   return caseId;
 }

@@ -125,6 +125,7 @@ describe('Case Intelligence API client', () => {
       jsonResponse({ assessment: {} }),
       jsonResponse({ exitMode: {} }),
       jsonResponse({ evidenceGate: {} }),
+      jsonResponse({ forecast: {} }),
     ];
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(responses.shift()));
     vi.stubGlobal('fetch', fetchMock);
@@ -141,8 +142,8 @@ describe('Case Intelligence API client', () => {
     expect(urls).toContain('/api/v1/accounts/acct-receiver-a/risk');
     expect(urls).toContain('/api/v1/accounts/acct-e/risk');
     expect(urls).toContain('/api/v1/cases/case%3Acomplaint-golden-a/exit-mode');
-    expect(urls.at(-1)).toBe('/api/v1/cases/case%3Acomplaint-golden-a/forecast');
-    expect(progress.at(-1)).toBe('Exit mode and Evidence Gate ready');
+    expect(urls.at(-1)).toBe('/api/v1/cases/case%3Acomplaint-golden-a/predictions');
+    expect(progress.at(-1)).toBe('Evidence-gated zone and time forecast ready');
   });
 
   it('treats missing exit-mode and gate snapshots as intentional pending states', async () => {
@@ -185,6 +186,9 @@ describe('Case Intelligence API client', () => {
           { error: 'EVIDENCE_GATE_NOT_AVAILABLE', message: 'Evidence Gate is pending' },
           409,
         ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ error: 'FORECAST_NOT_AVAILABLE', message: 'Forecast is pending' }, 409),
       );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -194,5 +198,7 @@ describe('Case Intelligence API client', () => {
     expect(result.exitModePending).toBe(true);
     expect(result.evidenceGate).toBeNull();
     expect(result.evidenceGatePending).toBe(true);
+    expect(result.forecast).toBeNull();
+    expect(result.forecastPending).toBe(true);
   });
 });

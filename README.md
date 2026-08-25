@@ -54,6 +54,16 @@ npm run dev:psp
 npm run dev:web
 ```
 
+For the deterministic three-service presentation setup:
+
+```bash
+npm run demo:smoke
+npm run dev:demo
+```
+
+See [docs/PRESENTATION_RUNBOOK.md](docs/PRESENTATION_RUNBOOK.md) for the exact judge flow and offline
+recovery steps.
+
 Run the verification suite:
 
 ```bash
@@ -78,7 +88,7 @@ docker compose up -d postgres redis
 6. PrivacyPass and lawful identity resolution
 7. Evidence anchors, command centre, and final QA
 
-See [docs/EVIDENCE_ANCHOR_BACKEND.md](docs/EVIDENCE_ANCHOR_BACKEND.md) for the accelerated backend integrity checkpoint, [docs/PHASE_3_EXIT_EVIDENCE_GATE.md](docs/PHASE_3_EXIT_EVIDENCE_GATE.md) for the current prediction checkpoint, and [docs/PHASE_1_TRACE.md](docs/PHASE_1_TRACE.md) for the trace foundation.
+See [docs/COMMAND_CENTER_BACKEND.md](docs/COMMAND_CENTER_BACKEND.md) for the operational API and priority policy, [docs/GOLDEN_DEMO_RUNBOOK.md](docs/GOLDEN_DEMO_RUNBOOK.md) for presentation verification/reset, [docs/EVIDENCE_ANCHOR_BACKEND.md](docs/EVIDENCE_ANCHOR_BACKEND.md) for the integrity checkpoint, and [docs/PHASE_1_TRACE.md](docs/PHASE_1_TRACE.md) for the trace foundation.
 
 ## Collaboration
 

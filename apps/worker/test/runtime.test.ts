@@ -22,6 +22,7 @@ class FakeQueue implements WorkerQueue {
   next: OutboxClaim | null = structuredClone(claim);
   completionTime: string | null = null;
   loseOnComplete = false;
+  failureCount = 0;
 
   async claimNext(_type: OutboxJobType) {
     const next = this.next;
@@ -36,6 +37,7 @@ class FakeQueue implements WorkerQueue {
     this.completionTime = completedAt;
   }
   async fail() {
+    this.failureCount += 1;
     return 'RETRY_SCHEDULED' as const;
   }
   async metrics() {
@@ -97,5 +99,35 @@ describe('DurableWorkerRuntime', () => {
     const running = runtime.run(controller.signal);
     controller.abort('test shutdown');
     await expect(running).resolves.toBeUndefined();
+  });
+
+  test('aborts an in-flight handler on shutdown without consuming a retry', async () => {
+    const queue = new FakeQueue();
+    let started!: () => void;
+    const handlerStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const runtime = new DurableWorkerRuntime(
+      queue,
+      {
+        ALERT_DISPATCH: async (_payload, context) => {
+          started();
+          await new Promise<void>((_resolve, reject) => {
+            const abort = () => reject(new Error('request aborted'));
+            if (context.signal.aborted) abort();
+            else context.signal.addEventListener('abort', abort, { once: true });
+          });
+        },
+      },
+      logger,
+      config,
+    );
+    const controller = new AbortController();
+    const processing = runtime.processOne('ALERT_DISPATCH', controller.signal);
+    await handlerStarted;
+    controller.abort('test shutdown');
+
+    await expect(processing).resolves.toBe('LEASE_LOST');
+    expect(queue.failureCount).toBe(0);
   });
 });

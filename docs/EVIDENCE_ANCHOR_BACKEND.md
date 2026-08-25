@@ -16,7 +16,15 @@ This checkpoint accelerates the backend integrity work from the later delivery s
 - Blockchain is used for evidence integrity and anchoring, not to trace UPI transfers.
 - No case ID, evidence reference, account reference, transaction reference, or raw evidence is sent to the provider.
 - The development provider is an in-memory deterministic hashchain. Its receipt is explicitly labelled `TRISHUL_DEVELOPMENT_HASHCHAIN` on `in-memory-development`; it is not represented as a public-chain transaction.
-- A production chain or consortium-ledger adapter can replace the provider without changing the HTTP or service contracts.
+- `REMOTE_GATEWAY` is the production adapter for an authorised chain/consortium-ledger gateway. It
+  submits only the evidence/submission hashes and timestamp, receives the real network transaction
+  receipt, and asks the gateway to verify the exact anchor reference and transaction hash.
+- Production refuses to start with the development hashchain. The remote adapter requires HTTPS,
+  a service token, bounded responses, an operation timeout, and submission-hash idempotency.
+- A gateway receipt must echo the exact evidence and submission hashes before TRISHUL persists it;
+  a valid-looking receipt for different hashes is rejected.
+- Gateway responses are streamed through a 64 KiB hard cap instead of being buffered before their
+  size is checked.
 
 ## Idempotency and immutability
 
@@ -36,4 +44,6 @@ Migration `002_evidence_anchor_receipts.sql` stores only digest and receipt meta
 - Provider inputs and HTTP receipts do not expose raw evidence or private account references.
 - Unknown cases cannot create anchors.
 - In-memory and PostgreSQL adapters cover create, replay, read, and verify flows.
+- Remote-adapter tests cover receipt validation, exact transaction verification, privacy, secure
+  configuration, bounded responses, and non-leaking errors.
 - The full repository test, typecheck, format, and production-build gates remain green.

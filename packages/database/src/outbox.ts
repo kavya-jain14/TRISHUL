@@ -9,6 +9,7 @@ export const OUTBOX_JOB_TYPES = [
   'FORECAST_REFRESH',
   'ALERT_DISPATCH',
   'EVIDENCE_ANCHOR',
+  'CASE_ACTION_EVENT',
 ] as const;
 
 export type OutboxJobType = (typeof OUTBOX_JOB_TYPES)[number];
