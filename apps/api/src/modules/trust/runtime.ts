@@ -1,5 +1,6 @@
 import { IdentifierSchema, PublicKeyPemSchema } from '@trishul/contracts';
-import { InMemoryCredentialRegistry, TrustAccessService } from '@trishul/trust';
+import type { TrustRepository } from '@trishul/database';
+import { InMemoryTrustRepository, TrustAccessService } from '@trishul/trust';
 import { z } from 'zod';
 
 const TrustAccessModeSchema = z.enum(['DEVELOPMENT_OPTIONAL', 'ENFORCED']);
@@ -20,17 +21,26 @@ export interface TrustAccessRuntime {
   enforceTrustAccess: boolean;
   mode: z.infer<typeof TrustAccessModeSchema>;
   activeIssuerCount: number;
-  revokedCredentialCount: number;
+  bootstrapRevokedCredentialCount: number;
 }
 
-export function trustAccessRuntimeFromEnvironment(
+export interface TrustAccessRuntimeOptions {
+  repository?: TrustRepository;
+  durablePersistence?: boolean;
+}
+
+export async function trustAccessRuntimeFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
-): TrustAccessRuntime {
+  options: TrustAccessRuntimeOptions = {},
+): Promise<TrustAccessRuntime> {
   const mode = TrustAccessModeSchema.parse(
     environment.TRISHUL_TRUST_ACCESS_MODE ?? 'DEVELOPMENT_OPTIONAL',
   );
   if (environment.NODE_ENV === 'production' && mode !== 'ENFORCED') {
     throw new Error('Production requires TRISHUL_TRUST_ACCESS_MODE=ENFORCED.');
+  }
+  if (environment.NODE_ENV === 'production' && !options.durablePersistence) {
+    throw new Error('Production Trust/Access requires durable PostgreSQL persistence.');
   }
 
   const issuers = parseJson(
@@ -45,29 +55,28 @@ export function trustAccessRuntimeFromEnvironment(
     'TRISHUL_REVOKED_CREDENTIAL_IDS_JSON',
     [],
   );
-  const activeIssuerCount = issuers.filter((issuer) => issuer.active).length;
+  const repository = options.repository ?? new InMemoryTrustRepository();
+  for (const issuer of issuers) {
+    await repository.registerIssuer(issuer.issuerId, issuer.publicKeyPem, issuer.active ?? true);
+  }
+  for (const credentialId of new Set(revokedCredentialIds)) {
+    await repository.revokeCredential(credentialId, new Date().toISOString());
+  }
+
+  const persistedIssuers = (await repository.getIssuers()).map((issuer) =>
+    TrustedIssuerSchema.parse(issuer),
+  );
+  const activeIssuerCount = persistedIssuers.filter((issuer) => issuer.active).length;
   if (mode === 'ENFORCED' && activeIssuerCount === 0) {
     throw new Error('Enforced Trust/Access requires at least one active trusted issuer.');
   }
 
-  const registry = new InMemoryCredentialRegistry();
-  for (const issuer of issuers) {
-    registry.registerIssuer({
-      issuerId: issuer.issuerId,
-      publicKeyPem: issuer.publicKeyPem,
-      active: issuer.active ?? true,
-    });
-  }
-  for (const credentialId of new Set(revokedCredentialIds)) {
-    registry.revokeCredential(credentialId);
-  }
-
   return {
-    service: new TrustAccessService(registry),
+    service: new TrustAccessService(repository),
     enforceTrustAccess: mode === 'ENFORCED',
     mode,
     activeIssuerCount,
-    revokedCredentialCount: new Set(revokedCredentialIds).size,
+    bootstrapRevokedCredentialCount: new Set(revokedCredentialIds).size,
   };
 }
 

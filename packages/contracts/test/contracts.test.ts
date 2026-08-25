@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CaseActionRequestSchema,
   CredentialClaimsSchema,
   ForecastSnapshotSchema,
   ExitModeRequestSchema,
   GraphEdgeSchema,
+  HistoricalInstitutionalOutcomeSchema,
   IdempotencyKeySchema,
   ProviderEventBatchSchema,
   ProviderEventSchema,
@@ -20,6 +22,27 @@ const provenance = {
 } as const;
 
 describe('shared contracts', () => {
+  it('requires attributable case-action evidence', () => {
+    expect(
+      CaseActionRequestSchema.safeParse({
+        actionId: 'action-1',
+        action: 'ALERT_BANK',
+        rationale: 'Provider review is required.',
+        evidenceAnchorIds: ['anchor:evidence-1'],
+        sourceUrls: ['https://example.test/evidence/1'],
+        occurredAt: '2026-08-24T10:00:00.000Z',
+      }).success,
+    ).toBe(true);
+    expect(
+      CaseActionRequestSchema.safeParse({
+        actionId: 'action-2',
+        action: 'ALERT_BANK',
+        rationale: 'Unsupported action.',
+        evidenceAnchorIds: [],
+        occurredAt: '2026-08-24T10:00:00.000Z',
+      }).success,
+    ).toBe(false);
+  });
   it('accepts a provenance-backed provider transfer', () => {
     const result = ProviderEventSchema.safeParse({
       eventId: 'evt-transfer-1',
@@ -73,6 +96,31 @@ describe('shared contracts', () => {
   it('validates bounded idempotency keys', () => {
     expect(IdempotencyKeySchema.safeParse('complaint:create:golden-a').success).toBe(true);
     expect(IdempotencyKeySchema.safeParse('x'.repeat(97)).success).toBe(false);
+  });
+
+  it('accepts only verified institutional or labelled simulator outcomes for network memory', () => {
+    expect(
+      HistoricalInstitutionalOutcomeSchema.safeParse({
+        status: 'CONFIRMED',
+        provenance,
+      }).success,
+    ).toBe(true);
+    expect(
+      HistoricalInstitutionalOutcomeSchema.safeParse({
+        status: 'CONFIRMED',
+        provenance: {
+          ...provenance,
+          sourceType: 'BANK',
+          evidenceState: 'SUBMITTED',
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      HistoricalInstitutionalOutcomeSchema.safeParse({
+        status: 'CONFIRMED',
+        provenance: { ...provenance, sourceType: 'COMPLAINT' },
+      }).success,
+    ).toBe(false);
   });
 
   it('accepts independent geo/time abstention as a valid forecast', () => {

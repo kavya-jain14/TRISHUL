@@ -3,7 +3,7 @@ import type { CredentialClaims, SignedCredential, TrustChallenge } from '@trishu
 import {
   challengeProofPayload,
   credentialSigningPayload,
-  InMemoryCredentialRegistry,
+  InMemoryTrustRepository,
   TrustAccessService,
 } from '@trishul/trust';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -35,11 +35,25 @@ function signedCredential(claims: CredentialClaims, issuerPrivateKey: KeyObject)
 }
 
 describe('canonical Trust/Access HTTP flow', () => {
+  it('does not expose issuer, revocation, or audit governance over HTTP', async () => {
+    const app = buildApp();
+    apps.push(app);
+
+    for (const request of [
+      { method: 'GET' as const, url: '/api/v1/trust/issuers' },
+      { method: 'POST' as const, url: '/api/v1/trust/issuers', payload: {} },
+      { method: 'POST' as const, url: '/api/v1/trust/revocations', payload: {} },
+      { method: 'GET' as const, url: '/api/v1/trust/audit' },
+    ]) {
+      expect((await app.inject(request)).statusCode).toBe(404);
+    }
+  });
+
   it('protects the case surface with a signed, subject-bound, case-scoped session', async () => {
     const issuer = keyPair();
     const subject = keyPair();
-    const registry = new InMemoryCredentialRegistry();
-    registry.registerIssuer({ issuerId: 'issuer:bank-a', publicKeyPem: issuer.publicKeyPem });
+    const registry = new InMemoryTrustRepository();
+    registry.registerIssuer('issuer:bank-a', issuer.publicKeyPem, true);
     const trustAccessService = new TrustAccessService(
       registry,
       {},

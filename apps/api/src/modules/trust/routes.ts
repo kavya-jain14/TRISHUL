@@ -4,7 +4,9 @@ import type { FastifyInstance } from 'fastify';
 
 export function registerTrustRoutes(app: FastifyInstance, service: TrustAccessService): void {
   app.post('/api/v1/trust/challenges', async (request, reply) => {
-    const challenge = service.createChallenge(TrustChallengeRequestSchema.parse(request.body));
+    const challenge = await service.createChallenge(
+      TrustChallengeRequestSchema.parse(request.body),
+    );
     return reply.status(201).send({ challenge });
   });
 

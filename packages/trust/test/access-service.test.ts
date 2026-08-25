@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   challengeProofPayload,
   credentialSigningPayload,
-  InMemoryCredentialRegistry,
+  InMemoryTrustRepository,
   TrustAccessError,
   TrustAccessService,
 } from '../src/index.js';
@@ -26,8 +26,8 @@ function signature(privateKey: KeyObject, payload: string): string {
 function fixture() {
   const issuer = keyPair();
   const subject = keyPair();
-  const registry = new InMemoryCredentialRegistry();
-  registry.registerIssuer({ issuerId: 'issuer:bank-a', publicKeyPem: issuer.publicKeyPem });
+  const registry = new InMemoryTrustRepository();
+  registry.registerIssuer('issuer:bank-a', issuer.publicKeyPem, true);
   const service = new TrustAccessService(registry, {}, () => new Date(now));
   const claims: CredentialClaims = {
     credentialId: 'credential:investigator-a',
@@ -61,16 +61,16 @@ function proof(
 }
 
 describe('TrustAccessService', () => {
-  it('binds a verified session to one capability, purpose, subject, and case', () => {
+  it('binds a verified session to one capability, purpose, subject, and case', async () => {
     const { service, subject, claims, credential } = fixture();
-    const challenge = service.createChallenge({
+    const challenge = await service.createChallenge({
       subjectId: claims.subjectId,
       capability: 'CASE_READ',
       purpose: 'FRAUD_INVESTIGATION',
       caseId: 'case:alpha',
     });
 
-    const result = service.verify({
+    const result = await service.verify({
       challengeId: challenge.challengeId,
       credential,
       proofSignature: proof(challenge, claims, subject.privateKey),
@@ -82,21 +82,21 @@ describe('TrustAccessService', () => {
       purpose: 'FRAUD_INVESTIGATION',
       caseId: 'case:alpha',
     });
-    expect(service.authorize(result.accessToken, 'CASE_READ', 'case:alpha')).toEqual(
+    expect(await service.authorize(result.accessToken, 'CASE_READ', 'case:alpha')).toEqual(
       result.session,
     );
-    expect(() => service.authorize(result.accessToken, 'CASE_WRITE', 'case:alpha')).toThrowError(
-      expect.objectContaining({ code: 'TRUST_CAPABILITY_DENIED' }),
-    );
-    expect(() => service.authorize(result.accessToken, 'CASE_READ', 'case:beta')).toThrowError(
-      expect.objectContaining({ code: 'TRUST_CASE_SCOPE_DENIED' }),
-    );
+    await expect(
+      service.authorize(result.accessToken, 'CASE_WRITE', 'case:alpha'),
+    ).rejects.toThrowError(expect.objectContaining({ code: 'TRUST_CAPABILITY_DENIED' }));
+    await expect(
+      service.authorize(result.accessToken, 'CASE_READ', 'case:beta'),
+    ).rejects.toThrowError(expect.objectContaining({ code: 'TRUST_CASE_SCOPE_DENIED' }));
   });
 
-  it('rejects a forged issuer signature without burning the challenge', () => {
+  it('rejects a forged issuer signature without burning the challenge', async () => {
     const { service, subject, claims, credential } = fixture();
     const attacker = keyPair();
-    const challenge = service.createChallenge({
+    const challenge = await service.createChallenge({
       subjectId: claims.subjectId,
       capability: 'CASE_READ',
       purpose: 'FRAUD_INVESTIGATION',
@@ -108,18 +108,20 @@ describe('TrustAccessService', () => {
       proofSignature: proof(challenge, claims, subject.privateKey),
     };
 
-    expect(() => service.verify({ ...request, credential: forged })).toThrowError(
+    await expect(service.verify({ ...request, credential: forged })).rejects.toThrowError(
       expect.objectContaining({
         code: 'TRUST_VERIFICATION_FAILED',
         reasonCodes: expect.arrayContaining(['SIGNATURE_INVALID']),
       }),
     );
-    expect(service.verify({ ...request, credential }).session.subjectId).toBe('investigator:a');
+    expect((await service.verify({ ...request, credential })).session.subjectId).toBe(
+      'investigator:a',
+    );
   });
 
-  it('binds the proof to the requested subject and does not consume a nonce on mismatch', () => {
+  it('binds the proof to the requested subject and does not consume a nonce on mismatch', async () => {
     const { service, subject, issuer, claims, credential } = fixture();
-    const challenge = service.createChallenge({
+    const challenge = await service.createChallenge({
       subjectId: claims.subjectId,
       capability: 'CASE_READ',
       purpose: 'FRAUD_INVESTIGATION',
@@ -128,42 +130,44 @@ describe('TrustAccessService', () => {
     const mismatchedClaims = { ...claims, subjectId: 'investigator:other' };
     const mismatchedCredential = signedCredential(mismatchedClaims, issuer.privateKey);
 
-    expect(() =>
+    await expect(
       service.verify({
         challengeId: challenge.challengeId,
         credential: mismatchedCredential,
         proofSignature: proof(challenge, mismatchedClaims, subject.privateKey),
       }),
-    ).toThrowError(
+    ).rejects.toThrowError(
       expect.objectContaining({ reasonCodes: expect.arrayContaining(['SUBJECT_MISMATCH']) }),
     );
 
     expect(
-      service.verify({
-        challengeId: challenge.challengeId,
-        credential,
-        proofSignature: proof(challenge, claims, subject.privateKey),
-      }).session.subjectId,
+      (
+        await service.verify({
+          challengeId: challenge.challengeId,
+          credential,
+          proofSignature: proof(challenge, claims, subject.privateKey),
+        })
+      ).session.subjectId,
     ).toBe(claims.subjectId);
   });
 
-  it('uses the same revocation source for registry writes and verification', () => {
+  it('uses the same revocation source for registry writes and verification', async () => {
     const { service, subject, registry, claims, credential } = fixture();
-    registry.revokeCredential(claims.credentialId);
-    const challenge = service.createChallenge({
+    await registry.revokeCredential(claims.credentialId, new Date().toISOString());
+    const challenge = await service.createChallenge({
       subjectId: claims.subjectId,
       capability: 'CASE_READ',
       purpose: 'FRAUD_INVESTIGATION',
       caseId: 'case:alpha',
     });
 
-    expect(() =>
+    await expect(
       service.verify({
         challengeId: challenge.challengeId,
         credential,
         proofSignature: proof(challenge, claims, subject.privateKey),
       }),
-    ).toThrowError(
+    ).rejects.toThrowError(
       expect.objectContaining({
         code: 'CREDENTIAL_REVOKED',
         reasonCodes: expect.arrayContaining(['CREDENTIAL_REVOKED']),
@@ -171,29 +175,29 @@ describe('TrustAccessService', () => {
     );
   });
 
-  it('invalidates an existing session immediately when its credential is revoked', () => {
+  it('invalidates an existing session immediately when its credential is revoked', async () => {
     const { service, subject, registry, claims, credential } = fixture();
-    const challenge = service.createChallenge({
+    const challenge = await service.createChallenge({
       subjectId: claims.subjectId,
       capability: 'CASE_READ',
       purpose: 'FRAUD_INVESTIGATION',
       caseId: 'case:alpha',
     });
-    const result = service.verify({
+    const result = await service.verify({
       challengeId: challenge.challengeId,
       credential,
       proofSignature: proof(challenge, claims, subject.privateKey),
     });
 
-    registry.revokeCredential(claims.credentialId);
-    expect(() => service.authorize(result.accessToken, 'CASE_READ', 'case:alpha')).toThrowError(
-      expect.objectContaining({ code: 'CREDENTIAL_REVOKED' }),
-    );
+    await registry.revokeCredential(claims.credentialId, new Date().toISOString());
+    await expect(
+      service.authorize(result.accessToken, 'CASE_READ', 'case:alpha'),
+    ).rejects.toThrowError(expect.objectContaining({ code: 'CREDENTIAL_REVOKED' }));
   });
 
-  it('rejects proof replay after the nonce is consumed', () => {
+  it('rejects proof replay after the nonce is consumed', async () => {
     const { service, subject, claims, credential } = fixture();
-    const challenge = service.createChallenge({
+    const challenge = await service.createChallenge({
       subjectId: claims.subjectId,
       capability: 'CASE_READ',
       purpose: 'FRAUD_INVESTIGATION',
@@ -205,24 +209,51 @@ describe('TrustAccessService', () => {
       proofSignature: proof(challenge, claims, subject.privateKey),
     };
 
-    service.verify(request);
-    expect(() => service.verify(request)).toThrowError(
+    await service.verify(request);
+    await expect(service.verify(request)).rejects.toThrowError(
       expect.objectContaining({
         reasonCodes: expect.arrayContaining(['NONCE_REPLAY_OR_EXPIRED']),
       }),
     );
   });
 
-  it('requires an explicit case scope for case-bound capabilities', () => {
+  it('requires an explicit case scope for case-bound capabilities', async () => {
     const { service } = fixture();
-    expect(() =>
+    await expect(
       service.createChallenge({
         subjectId: 'investigator:a',
-        capability: 'IDENTITY_RESOLUTION',
+        capability: 'IDENTITY_RESOLUTION_REQUEST',
         purpose: 'LAW_ENFORCEMENT_REQUEST',
       }),
-    ).toThrowError(
+    ).rejects.toThrowError(
       expect.objectContaining<Partial<TrustAccessError>>({ code: 'CASE_SCOPE_REQUIRED' }),
+    );
+  });
+
+  it('preserves credential case scopes for a non-case command-center session', async () => {
+    const { service, subject, issuer, claims } = fixture();
+    const commandClaims: CredentialClaims = {
+      ...claims,
+      capabilities: ['COMMAND_CENTER_READ'],
+      caseIds: ['case:alpha', 'case:beta'],
+    };
+    const challenge = await service.createChallenge({
+      subjectId: commandClaims.subjectId,
+      capability: 'COMMAND_CENTER_READ',
+      purpose: 'FRAUD_INVESTIGATION',
+    });
+    const result = await service.verify({
+      challengeId: challenge.challengeId,
+      credential: signedCredential(commandClaims, issuer.privateKey),
+      proofSignature: proof(challenge, commandClaims, subject.privateKey),
+    });
+
+    expect(result.session).toMatchObject({
+      capabilities: ['COMMAND_CENTER_READ'],
+      caseIds: ['case:alpha', 'case:beta'],
+    });
+    expect(await service.authorize(result.accessToken, 'COMMAND_CENTER_READ')).toEqual(
+      result.session,
     );
   });
 });

@@ -32,7 +32,7 @@ describe('TRISHUL API foundation', () => {
       predictionCanAbstain: true,
     });
     expect(response.json()).toMatchObject({
-      phase: 'PHASE_4_ZONE_TIME_REFORECAST',
+      phase: 'PHASE_7_COMMAND_CENTER_ALERTS',
       trustAccessMode: 'OPTIONAL_DEVELOPMENT_ADAPTER',
     });
     expect(response.json().capabilities).toEqual(
@@ -43,6 +43,7 @@ describe('TRISHUL API foundation', () => {
         'TOP_K_GEO_FORECAST',
         'TIME_HORIZON_FORECAST',
         'VERSIONED_REFORECAST',
+        'DURABLE_CASE_ACTION_EVENTS',
         'PII_FREE_EVIDENCE_ANCHORING',
         'TAMPER_EVIDENT_VERIFICATION',
         'REPLACEABLE_BLOCKCHAIN_PROVIDER',
@@ -50,6 +51,18 @@ describe('TRISHUL API foundation', () => {
         'SUBJECT_BOUND_CHALLENGE_PROOF',
         'CAPABILITY_AND_CASE_SCOPED_ACCESS',
         'REPLAY_SAFE_NONCE_VERIFICATION',
+        'EXPLAINABLE_PRE_PAYMENT_RISK',
+        'PAYER_STEP_UP_DECISION',
+        'TRUST_RISK_SEPARATION',
+        'DURABLE_PAYMENT_RISK_HISTORY',
+        'CROSS_CASE_NETWORK_MEMORY',
+        'OPAQUE_CASE_CORRELATION',
+        'TRUSTED_OUTCOME_WEIGHTING',
+        'INTERNAL_CORRELATION_TO_MULE_RISK',
+        'DETERMINISTIC_CASE_PRIORITY',
+        'OPERATIONAL_INTERVENTION_STATES',
+        'TRUST_SCOPED_COMMAND_CENTER',
+        'DURABLE_ALERT_LIFECYCLE',
       ]),
     );
   });
