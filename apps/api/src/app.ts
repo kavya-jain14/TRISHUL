@@ -4,7 +4,14 @@ import { InMemoryTrustRepository, TrustAccessError, TrustAccessService } from '@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { DomainError } from './domain/errors.js';
-import { InMemoryCaseActionRepository, InMemoryPaymentRiskRepository } from '@trishul/database';
+import {
+  InMemoryCaseActionRepository,
+  InMemoryCommandCenterRepository,
+  InMemoryNetworkMemoryRepository,
+  InMemoryPaymentRiskRepository,
+  type NetworkMemoryRepository,
+  CommandCenterConflictError,
+} from '@trishul/database';
 import { registerCaseActionRoutes } from './modules/case-actions/routes.js';
 import { CaseActionService } from './modules/case-actions/service.js';
 import { InMemoryCaseRepository } from './modules/cases/case-repository.js';
@@ -24,6 +31,10 @@ import { InMemoryIdentityResolutionRepository } from './modules/identity-resolut
 import { registerIdentityResolutionRoutes } from './modules/identity-resolution/routes.js';
 import { registerPaymentRiskRoutes } from './modules/payment-risk/routes.js';
 import { PaymentRiskService } from './modules/payment-risk/service.js';
+import { registerNetworkMemoryRoutes } from './modules/network-memory/routes.js';
+import { CrossCaseCorrelationService } from './modules/network-memory/service.js';
+import { registerCommandCenterRoutes } from './modules/command-center/routes.js';
+import { CommandCenterService } from './modules/command-center/service.js';
 
 export interface BuildAppOptions {
   logger?: boolean;
@@ -33,6 +44,9 @@ export interface BuildAppOptions {
   trustAccessService?: TrustAccessService;
   identityResolutionService?: IdentityResolutionService;
   paymentRiskService?: PaymentRiskService;
+  networkMemoryRepository?: NetworkMemoryRepository;
+  crossCaseCorrelationService?: CrossCaseCorrelationService;
+  commandCenterService?: CommandCenterService;
   enforcePaymentRiskServiceToken?: boolean;
   paymentRiskServiceToken?: string;
   enforceTrustAccess?: boolean;
@@ -47,7 +61,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     methods: ['GET', 'POST', 'OPTIONS'],
   });
 
-  const caseService = options.caseService ?? new CaseService(new InMemoryCaseRepository());
+  const networkMemoryRepository =
+    options.networkMemoryRepository ?? new InMemoryNetworkMemoryRepository();
+  const caseService =
+    options.caseService ??
+    new CaseService(new InMemoryCaseRepository(), undefined, (caseId, graphVersion, accountId) =>
+      networkMemoryRepository.latestSignal(caseId, graphVersion, accountId),
+    );
   const trustAccessService =
     options.trustAccessService ?? new TrustAccessService(new InMemoryTrustRepository());
   if (options.enforceTrustAccess) registerTrustAccessGuard(app, trustAccessService);
@@ -66,6 +86,16 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       (anchorId) => evidenceAnchorService.get(anchorId),
     );
   registerCaseRoutes(app, caseService);
+  const crossCaseCorrelationService =
+    options.crossCaseCorrelationService ??
+    new CrossCaseCorrelationService(networkMemoryRepository, (caseId) =>
+      caseService.getLatestGraph(caseId),
+    );
+  registerNetworkMemoryRoutes(app, crossCaseCorrelationService);
+  const commandCenterService =
+    options.commandCenterService ??
+    new CommandCenterService(new InMemoryCommandCenterRepository(), caseService);
+  registerCommandCenterRoutes(app, commandCenterService, trustAccessService);
   registerCaseActionRoutes(app, caseActionService, trustAccessService);
   registerEvidenceAnchorRoutes(app, evidenceAnchorService);
   registerTrustRoutes(app, trustAccessService);
@@ -96,7 +126,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   app.get('/api/v1/system/manifest', async () => ({
     product: 'TRISHUL',
-    phase: 'PHASE_4_ZONE_TIME_REFORECAST',
+    phase: 'PHASE_7_COMMAND_CENTER_ALERTS',
     persistenceMode: options.persistenceMode ?? 'IN_MEMORY_DEVELOPMENT_ADAPTER',
     trustAccessMode: options.enforceTrustAccess ? 'ENFORCED' : 'OPTIONAL_DEVELOPMENT_ADAPTER',
     doctrine: {
@@ -135,6 +165,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       'PAYER_STEP_UP_DECISION',
       'TRUST_RISK_SEPARATION',
       'DURABLE_PAYMENT_RISK_HISTORY',
+      'CROSS_CASE_NETWORK_MEMORY',
+      'OPAQUE_CASE_CORRELATION',
+      'TRUSTED_OUTCOME_WEIGHTING',
+      'INTERNAL_CORRELATION_TO_MULE_RISK',
+      'DETERMINISTIC_CASE_PRIORITY',
+      'OPERATIONAL_INTERVENTION_STATES',
+      'TRUST_SCOPED_COMMAND_CENTER',
+      'DURABLE_ALERT_LIFECYCLE',
     ],
   }));
 
@@ -152,6 +190,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         error: error.code,
         message: error.message,
         reasonCodes: error.reasonCodes,
+      });
+    }
+
+    if (error instanceof CommandCenterConflictError) {
+      const statusCode = error.code.endsWith('NOT_FOUND') ? 404 : 409;
+      return reply.status(statusCode).send({
+        error: error.code,
+        message: error.message,
       });
     }
 

@@ -30,6 +30,7 @@ import {
   type ProviderEventIngestResult,
   type TraceRunResult,
 } from '@trishul/contracts';
+import type { CrossCaseSignalReference } from '@trishul/database';
 import { buildTraceGraph, calculateGraphExposure } from '@trishul/graph';
 import { assessMuleRisk, deriveMuleRiskFeatures } from '@trishul/intelligence';
 import {
@@ -43,6 +44,11 @@ import { ConflictError, InvalidRequestError, NotFoundError } from '../../domain/
 import type { CaseRecord, CaseRepository, IdempotencyRecord } from './case-repository.js';
 
 type Clock = () => string;
+type CrossCaseSignalLookup = (
+  caseId: string,
+  graphVersion: number,
+  accountId: string,
+) => Promise<CrossCaseSignalReference | null>;
 
 interface ReplayResult<T> {
   value: T;
@@ -62,6 +68,7 @@ export class CaseService {
   constructor(
     private readonly repository: CaseRepository,
     private readonly clock: Clock = () => new Date().toISOString(),
+    private readonly crossCaseSignalLookup: CrossCaseSignalLookup = async () => null,
   ) {}
 
   async createComplaint(
@@ -114,6 +121,11 @@ export class CaseService {
 
   async getCase(caseId: string): Promise<CaseDetail> {
     return this.toDetail(await this.requireCase(caseId));
+  }
+
+  /** Internal read model input; never exposed directly over HTTP. */
+  async getOperationalCaseRecord(caseId: string): Promise<CaseRecord> {
+    return structuredClone(await this.requireCase(caseId));
   }
 
   async resolveTransaction(
@@ -453,11 +465,23 @@ export class CaseService {
       );
     }
 
+    const internalCrossCaseSignal = await this.crossCaseSignalLookup(
+      payload.caseId,
+      graph.graphVersion,
+      accountId,
+    );
+    const effectiveProviderSignals = internalCrossCaseSignal
+      ? {
+          ...payload.providerSignals,
+          crossCaseLinkage: internalCrossCaseSignal.crossCaseLinkage,
+        }
+      : payload.providerSignals;
     const operation = `case:${payload.caseId}:account:${accountId}:risk`;
     const calculationInputHash = hashEvidence({
       graphVersion: graph.graphVersion,
       accountId,
-      providerSignals: payload.providerSignals,
+      providerSignals: effectiveProviderSignals,
+      crossCaseCorrelationRunId: internalCrossCaseSignal?.correlationRunId ?? null,
       trustedOutcome: payload.trustedOutcome,
     });
     const replay = await this.readReplay<MuleAssessmentSnapshot>(
@@ -484,7 +508,7 @@ export class CaseService {
 
     let features;
     try {
-      features = deriveMuleRiskFeatures(graph, accountId, payload.providerSignals);
+      features = deriveMuleRiskFeatures(graph, accountId, effectiveProviderSignals);
     } catch (error) {
       if (error instanceof RangeError) {
         throw new InvalidRequestError('RISK_EVIDENCE_INVALID', error.message);
@@ -509,6 +533,9 @@ export class CaseService {
       ruleVersion: result.ruleVersion,
       calculationInputHash,
       signalProvenance: payload.providerSignals.provenance,
+      ...(internalCrossCaseSignal
+        ? { crossCaseCorrelationRunId: internalCrossCaseSignal.correlationRunId }
+        : {}),
       trustedOutcome: payload.trustedOutcome,
       assessedAt,
     });

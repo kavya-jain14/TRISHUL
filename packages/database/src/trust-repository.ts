@@ -198,8 +198,8 @@ export class PostgresTrustRepository implements TrustRepository {
   async saveSession(sessionData: StoredSession): Promise<void> {
     await this.pool.query(
       `INSERT INTO trust_sessions 
-        (token_digest, session_id, credential_id, issuer_id, subject_id, role, capabilities, purpose, case_id, issued_at, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        (token_digest, session_id, credential_id, issuer_id, subject_id, role, capabilities, purpose, case_id, case_ids, issued_at, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         sessionData.tokenDigest,
         sessionData.session.sessionId,
@@ -210,6 +210,7 @@ export class PostgresTrustRepository implements TrustRepository {
         JSON.stringify(sessionData.session.capabilities),
         sessionData.session.purpose,
         sessionData.session.caseId ?? null,
+        JSON.stringify(sessionData.session.caseIds),
         sessionData.session.issuedAt,
         sessionData.session.expiresAt,
       ],
@@ -218,7 +219,7 @@ export class PostgresTrustRepository implements TrustRepository {
 
   async getSession(tokenDigest: string): Promise<StoredSession | null> {
     const result = await this.pool.query(
-      `SELECT token_digest, session_id, credential_id, issuer_id, subject_id, role, capabilities, purpose, case_id, issued_at, expires_at
+      `SELECT token_digest, session_id, credential_id, issuer_id, subject_id, role, capabilities, purpose, case_id, case_ids, issued_at, expires_at
        FROM trust_sessions WHERE token_digest = $1`,
       [tokenDigest],
     );
@@ -236,6 +237,7 @@ export class PostgresTrustRepository implements TrustRepository {
           typeof row.capabilities === 'string' ? JSON.parse(row.capabilities) : row.capabilities,
         purpose: row.purpose,
         ...(row.case_id ? { caseId: row.case_id } : {}),
+        caseIds: typeof row.case_ids === 'string' ? JSON.parse(row.case_ids) : row.case_ids,
         issuedAt: row.issued_at.toISOString(),
         expiresAt: row.expires_at.toISOString(),
       }),

@@ -210,6 +210,7 @@ export class PostgresCaseRepository implements CaseRepository {
       rule_version: string;
       calculation_input_hash: string;
       signal_provenance: unknown;
+      cross_case_correlation_run_id: string | null;
       trusted_outcome: unknown;
       assessed_at: Date | string;
     }>(
@@ -225,6 +226,7 @@ export class PostgresCaseRepository implements CaseRepository {
          ma.rule_version,
          ma.calculation_input_hash,
          ma.signal_provenance,
+         ma.cross_case_correlation_run_id,
          ma.trusted_outcome,
          ma.assessed_at
        FROM mule_assessments ma
@@ -247,6 +249,9 @@ export class PostgresCaseRepository implements CaseRepository {
         ruleVersion: assessmentRow.rule_version,
         calculationInputHash: assessmentRow.calculation_input_hash,
         signalProvenance: jsonValue(assessmentRow.signal_provenance),
+        ...(assessmentRow.cross_case_correlation_run_id
+          ? { crossCaseCorrelationRunId: assessmentRow.cross_case_correlation_run_id }
+          : {}),
         trustedOutcome: jsonValue(assessmentRow.trusted_outcome),
         assessedAt: iso(assessmentRow.assessed_at),
       }),
@@ -707,10 +712,10 @@ export class PostgresCaseRepository implements CaseRepository {
           `INSERT INTO mule_assessments (
              assessment_ref, case_id, account_id, graph_version, state, score, reason_codes,
              features, feature_version, rule_version, calculation_input_hash, signal_provenance,
-             trusted_outcome, assessed_at
+             cross_case_correlation_run_id, trusted_outcome, assessed_at
            ) VALUES (
              $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11,
-             $12::jsonb, $13::jsonb, $14
+             $12::jsonb, $13, $14::jsonb, $15
            )
            ON CONFLICT (case_id, graph_version, account_id) DO UPDATE SET
              assessed_at = mule_assessments.assessed_at
@@ -729,6 +734,7 @@ export class PostgresCaseRepository implements CaseRepository {
             assessment.ruleVersion,
             assessment.calculationInputHash,
             JSON.stringify(assessment.signalProvenance),
+            assessment.crossCaseCorrelationRunId ?? null,
             JSON.stringify(assessment.trustedOutcome),
             assessment.assessedAt,
           ],

@@ -1,8 +1,12 @@
 import { Pool } from 'pg';
 import {
   InMemoryCaseActionRepository,
+  InMemoryCommandCenterRepository,
+  InMemoryNetworkMemoryRepository,
   InMemoryPaymentRiskRepository,
   PostgresCaseActionRepository,
+  PostgresCommandCenterRepository,
+  PostgresNetworkMemoryRepository,
   PostgresPaymentRiskRepository,
 } from '@trishul/database';
 import { DevelopmentHashchainProvider } from '@trishul/audit';
@@ -24,6 +28,8 @@ import {
 } from './modules/identity-resolution/identity-resolution-service.js';
 import { trustAccessRuntimeFromEnvironment } from './modules/trust/runtime.js';
 import { PaymentRiskService } from './modules/payment-risk/service.js';
+import { CrossCaseCorrelationService } from './modules/network-memory/service.js';
+import { CommandCenterService } from './modules/command-center/service.js';
 
 const port = Number.parseInt(process.env.API_PORT ?? '4000', 10);
 const host = process.env.API_HOST ?? '0.0.0.0';
@@ -31,7 +37,12 @@ const pool = process.env.DATABASE_URL
   ? new Pool({ connectionString: process.env.DATABASE_URL })
   : null;
 const repository = pool ? new PostgresCaseRepository(pool) : new InMemoryCaseRepository();
-const caseService = new CaseService(repository);
+const networkMemoryRepository = pool
+  ? new PostgresNetworkMemoryRepository(pool)
+  : new InMemoryNetworkMemoryRepository();
+const caseService = new CaseService(repository, undefined, (caseId, graphVersion, accountId) =>
+  networkMemoryRepository.latestSignal(caseId, graphVersion, accountId),
+);
 const actionRepository = pool
   ? new PostgresCaseActionRepository(pool)
   : new InMemoryCaseActionRepository();
@@ -58,6 +69,9 @@ const identityProvider =
 const paymentRiskRepository = pool
   ? new PostgresPaymentRiskRepository(pool)
   : new InMemoryPaymentRiskRepository();
+const commandCenterRepository = pool
+  ? new PostgresCommandCenterRepository(pool)
+  : new InMemoryCommandCenterRepository();
 const enforcePaymentRiskServiceToken = process.env.NODE_ENV === 'production';
 const paymentRiskServiceToken = process.env.TRISHUL_INTERNAL_SERVICE_TOKEN;
 if (enforcePaymentRiskServiceToken && !paymentRiskServiceToken) {
@@ -80,6 +94,11 @@ const app = buildApp({
     (caseId) => caseService.getCase(caseId),
   ),
   paymentRiskService: new PaymentRiskService(paymentRiskRepository),
+  commandCenterService: new CommandCenterService(commandCenterRepository, caseService),
+  networkMemoryRepository,
+  crossCaseCorrelationService: new CrossCaseCorrelationService(networkMemoryRepository, (caseId) =>
+    caseService.getLatestGraph(caseId),
+  ),
   enforcePaymentRiskServiceToken,
   ...(paymentRiskServiceToken ? { paymentRiskServiceToken } : {}),
   persistenceMode: pool ? 'POSTGRESQL' : 'IN_MEMORY_DEVELOPMENT_ADAPTER',
