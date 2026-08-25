@@ -1,8 +1,18 @@
+import cors from '@fastify/cors';
 import Fastify from 'fastify';
 import { ScenarioStore } from './store.js';
 
-export function buildSandboxApp(store = new ScenarioStore()) {
+export interface SandboxAppOptions {
+  corsOrigins?: true | string[];
+}
+
+export function buildSandboxApp(store = new ScenarioStore(), options: SandboxAppOptions = {}) {
   const app = Fastify({ logger: false });
+
+  void app.register(cors, {
+    origin: options.corsOrigins ?? true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+  });
 
   app.get('/api/v1/health', async () => ({
     status: 'ok',
