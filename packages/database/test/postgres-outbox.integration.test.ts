@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { describe, expect, test } from 'vitest';
 import { PostgresAlertRepository } from '../src/alerts.js';
+import { CaseActionConflictError, PostgresCaseActionRepository } from '../src/case-actions.js';
 import { LeaseLostError, PostgresOutboxRepository } from '../src/outbox.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -134,6 +135,100 @@ describe.skipIf(!databaseUrl)('PostgresOutboxRepository integration', () => {
       await cleanup(adminPool, pool, schema);
     }
   });
+
+  test('persists a case action and its durable event atomically', async () => {
+    const { adminPool, pool, schema } = await isolatedDatabase(databaseUrl!);
+    try {
+      await pool.query(
+        `INSERT INTO cases (external_case_id, state, original_transaction_ref)
+         VALUES ($1, 'REPORTED', $2)`,
+        ['case-action-test', 'rrn-action-test'],
+      );
+      const repository = new PostgresCaseActionRepository(pool);
+      const action = {
+        actionId: 'action-pg-1',
+        caseId: 'case-action-test',
+        action: 'ALERT_LEA' as const,
+        actorRef: 'analyst-pg',
+        actorRole: 'SUPERVISOR' as const,
+        purpose: 'FRAUD_INVESTIGATION' as const,
+        rationale: 'Evidence-backed escalation to law enforcement.',
+        evidenceAnchorIds: ['anchor:action-pg-1'],
+        sourceUrls: ['https://example.test/evidence/action-pg-1'],
+        occurredAt: '2026-08-24T13:00:00.000Z',
+        recordedAt: '2026-08-24T13:00:01.000Z',
+      };
+      const input = { action, idempotencyKey: 'action-pg-key', requestHash: 'a'.repeat(64) };
+
+      expect((await repository.record(input)).status).toBe('CREATED');
+      expect((await repository.record(input)).status).toBe('IDEMPOTENT_REPLAY');
+      await expect(
+        repository.record({ ...input, requestHash: 'b'.repeat(64) }),
+      ).rejects.toBeInstanceOf(CaseActionConflictError);
+      expect(await repository.listForCase(action.caseId)).toEqual([action]);
+      const queued = await pool.query(
+        `SELECT job_type, payload, idempotency_key FROM outbox_jobs WHERE job_type = 'CASE_ACTION_EVENT'`,
+      );
+      expect(queued.rows).toEqual([
+        expect.objectContaining({
+          job_type: 'CASE_ACTION_EVENT',
+          idempotency_key: 'case-action:action-pg-1',
+          payload: { action },
+        }),
+      ]);
+    } finally {
+      await cleanup(adminPool, pool, schema);
+    }
+  });
+
+  test('rolls back the case action when its outbox enqueue fails', async () => {
+    const { adminPool, pool, schema } = await isolatedDatabase(databaseUrl!);
+    try {
+      await pool.query(
+        `INSERT INTO cases (external_case_id, state, original_transaction_ref)
+         VALUES ($1, 'REPORTED', $2)`,
+        ['case-action-rollback', 'rrn-action-rollback'],
+      );
+      await pool.query(`
+        CREATE FUNCTION reject_case_action_event() RETURNS trigger AS $$
+        BEGIN
+          IF NEW.job_type = 'CASE_ACTION_EVENT' THEN
+            RAISE EXCEPTION 'forced outbox failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER reject_case_action_event_trigger
+          BEFORE INSERT ON outbox_jobs
+          FOR EACH ROW EXECUTE FUNCTION reject_case_action_event();
+      `);
+      const repository = new PostgresCaseActionRepository(pool);
+      const action = {
+        actionId: 'action-pg-rollback',
+        caseId: 'case-action-rollback',
+        action: 'ALERT_BANK' as const,
+        actorRef: 'investigator:rollback',
+        actorRole: 'INVESTIGATOR' as const,
+        purpose: 'FRAUD_INVESTIGATION' as const,
+        rationale: 'Verified evidence requires provider review.',
+        evidenceAnchorIds: ['anchor:rollback'],
+        sourceUrls: [],
+        occurredAt: '2026-08-24T13:10:00.000Z',
+        recordedAt: '2026-08-24T13:10:01.000Z',
+      };
+
+      await expect(
+        repository.record({
+          action,
+          idempotencyKey: 'action-pg-rollback-key',
+          requestHash: 'c'.repeat(64),
+        }),
+      ).rejects.toThrow('forced outbox failure');
+      expect((await pool.query(`SELECT action_id FROM case_actions`)).rows).toEqual([]);
+    } finally {
+      await cleanup(adminPool, pool, schema);
+    }
+  });
 });
 
 async function isolatedDatabase(connectionString: string) {
@@ -141,7 +236,12 @@ async function isolatedDatabase(connectionString: string) {
   const adminPool = new Pool({ connectionString, max: 1 });
   await adminPool.query(`CREATE SCHEMA "${schema}"`);
   const pool = new Pool({ connectionString, max: 4, options: `-c search_path=${schema}` });
-  for (const migrationFile of ['001_core.sql', '004_durable_outbox.sql']) {
+  for (const migrationFile of [
+    '001_core.sql',
+    '004_durable_outbox.sql',
+    '005_case_actions.sql',
+    '010_command_center.sql',
+  ]) {
     const migration = await readFile(
       new URL(`../migrations/${migrationFile}`, import.meta.url),
       'utf8',

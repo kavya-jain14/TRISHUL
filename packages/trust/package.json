@@ -15,5 +15,9 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@trishul/contracts": "*",
+    "@trishul/database": "^0.1.0"
   }
 }
