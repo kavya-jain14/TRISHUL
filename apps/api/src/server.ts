@@ -9,7 +9,6 @@ import {
   PostgresNetworkMemoryRepository,
   PostgresPaymentRiskRepository,
 } from '@trishul/database';
-import { DevelopmentHashchainProvider } from '@trishul/audit';
 import { PostgresIdentityResolutionRepository, PostgresTrustRepository } from '@trishul/database';
 import { InMemoryTrustRepository } from '@trishul/trust';
 import { buildApp } from './app.js';
@@ -20,6 +19,7 @@ import { CaseActionService } from './modules/case-actions/service.js';
 import { InMemoryEvidenceAnchorRepository } from './modules/evidence-anchors/anchor-repository.js';
 import { EvidenceAnchorService } from './modules/evidence-anchors/anchor-service.js';
 import { PostgresEvidenceAnchorRepository } from './modules/evidence-anchors/postgres-anchor-repository.js';
+import { evidenceAnchorProviderFromEnvironment } from './modules/evidence-anchors/provider.js';
 import { InMemoryIdentityResolutionRepository } from './modules/identity-resolution/in-memory-identity-resolution-repository.js';
 import {
   IdentityResolutionService,
@@ -51,7 +51,7 @@ const anchorRepository = pool
   : new InMemoryEvidenceAnchorRepository();
 const evidenceAnchorService = new EvidenceAnchorService(
   anchorRepository,
-  new DevelopmentHashchainProvider(),
+  evidenceAnchorProviderFromEnvironment(),
   (caseId) => caseService.getCase(caseId),
 );
 const trustRepository = pool ? new PostgresTrustRepository(pool) : new InMemoryTrustRepository();
