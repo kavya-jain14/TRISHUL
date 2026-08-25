@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { PostgresAlertRepository, PostgresOutboxRepository } from '@trishul/database';
 import { Pool } from 'pg';
 import { createDevelopmentHandlers } from './handlers.js';
+import { TrishulApiClient } from './api-client.js';
+import { createDomainHandlers } from './domain-handlers.js';
 import { JsonStructuredLogger } from './logger.js';
 import { DurableWorkerRuntime } from './runtime.js';
 
@@ -18,8 +20,20 @@ const pollIntervalMs = positiveInteger('WORKER_POLL_MS', 1_000);
 const leaseMs = positiveInteger('WORKER_LEASE_MS', 30_000);
 const heartbeatIntervalMs = positiveInteger('WORKER_HEARTBEAT_MS', 10_000);
 const metricsIntervalMs = positiveInteger('WORKER_METRICS_MS', 30_000);
+const operations = new TrishulApiClient(
+  process.env.TRISHUL_API_BASE_URL ?? 'http://127.0.0.1:4000',
+  process.env.TRISHUL_INTERNAL_SERVICE_TOKEN,
+  fetch,
+  {
+    timeoutMs: positiveInteger('TRISHUL_API_TIMEOUT_MS', 10_000),
+    allowInsecureHttp: process.env.NODE_ENV !== 'production',
+  },
+);
 
-const handlers = createDevelopmentHandlers(alerts, logger);
+const handlers = {
+  ...createDevelopmentHandlers(alerts, logger),
+  ...createDomainHandlers(operations, logger),
+};
 
 const runtime = new DurableWorkerRuntime(queue, handlers, logger, {
   workerId,

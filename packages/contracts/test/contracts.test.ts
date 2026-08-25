@@ -9,6 +9,7 @@ import {
   IdempotencyKeySchema,
   ProviderEventBatchSchema,
   ProviderEventSchema,
+  TraceGraphExpansionJobSchema,
   assertCaseTransition,
   canTransitionCase,
 } from '../src/index.js';
@@ -40,6 +41,22 @@ describe('shared contracts', () => {
         rationale: 'Unsupported action.',
         evidenceAnchorIds: [],
         occurredAt: '2026-08-24T10:00:00.000Z',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects unknown fields in durable worker jobs', () => {
+    expect(
+      TraceGraphExpansionJobSchema.safeParse({
+        caseId: 'case-worker-contract',
+        idempotencyKey: 'trace-worker-contract',
+      }).success,
+    ).toBe(true);
+    expect(
+      TraceGraphExpansionJobSchema.safeParse({
+        caseId: 'case-worker-contract',
+        idempotencyKey: 'trace-worker-contract',
+        rawProviderPayload: { shouldNotCrossBoundary: true },
       }).success,
     ).toBe(false);
   });

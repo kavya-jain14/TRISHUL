@@ -14,3 +14,4 @@ export * from './trace.js';
 export * from './trust.js';
 export * from './identity.js';
 export * from './network-memory.js';
+export * from './worker-jobs.js';
