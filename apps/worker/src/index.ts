@@ -1,14 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import {
-  PostgresAlertRepository,
-  PostgresOutboxRepository,
-  type OutboxJobType,
-} from '@trishul/database';
+import { PostgresAlertRepository, PostgresOutboxRepository } from '@trishul/database';
 import { Pool } from 'pg';
+import { createDevelopmentHandlers } from './handlers.js';
 import { TrishulApiClient } from './api-client.js';
 import { createDomainHandlers } from './domain-handlers.js';
 import { JsonStructuredLogger } from './logger.js';
-import { DurableWorkerRuntime, type JobHandler } from './runtime.js';
+import { DurableWorkerRuntime } from './runtime.js';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString)
@@ -33,18 +30,9 @@ const operations = new TrishulApiClient(
   },
 );
 
-const handlers: Partial<Record<OutboxJobType, JobHandler>> = {
+const handlers = {
+  ...createDevelopmentHandlers(alerts, logger),
   ...createDomainHandlers(operations, logger),
-  ALERT_DISPATCH: async (payload, context) => {
-    if (context.signal.aborted) throw new Error('Alert dispatch was aborted after lease loss.');
-    const result = await alerts.persist(payload);
-    logger.log('info', 'alert_dispatched', {
-      deliveryMode: 'STRUCTURED_LOG_DEVELOPMENT_ADAPTER',
-      alertId: result.alert.alertId,
-      caseId: result.alert.caseId,
-      persistenceStatus: result.status,
-    });
-  },
 };
 
 const runtime = new DurableWorkerRuntime(queue, handlers, logger, {

@@ -3,7 +3,13 @@ import { AlertJobPayloadSchema, type AlertJobPayload } from '@trishul/contracts'
 import type { Pool } from 'pg';
 
 export interface PersistedAlert extends AlertJobPayload {
+  status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
   acknowledgedAt: string | null;
+  acknowledgedBy: string | null;
+  acknowledgementRationale: string | null;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  resolutionRationale: string | null;
 }
 
 interface AlertRow {
@@ -15,14 +21,30 @@ interface AlertRow {
   message: string;
   sourceEventId: string | null;
   sourceUrls: unknown;
+  priorityRunId: string | null;
+  deduplicationKey: string | null;
+  reasonCodes: unknown;
+  recommendedActions: unknown;
+  status: PersistedAlert['status'];
   createdAt: Date | string;
   acknowledgedAt: Date | string | null;
+  acknowledgedBy: string | null;
+  acknowledgementRationale: string | null;
+  resolvedAt: Date | string | null;
+  resolvedBy: string | null;
+  resolutionRationale: string | null;
 }
 
 const ALERT_COLUMNS = `alerts.alert_id AS "alertId", cases.external_case_id AS "caseId",
   alerts.severity, alerts.kind, alerts.title, alerts.message,
   alerts.source_event_id AS "sourceEventId", alerts.source_urls AS "sourceUrls",
-  alerts.created_at AS "createdAt", alerts.acknowledged_at AS "acknowledgedAt"`;
+  alerts.priority_run_id AS "priorityRunId", alerts.deduplication_key AS "deduplicationKey",
+  alerts.reason_codes AS "reasonCodes", alerts.recommended_actions AS "recommendedActions",
+  alerts.status, alerts.created_at AS "createdAt", alerts.acknowledged_at AS "acknowledgedAt",
+  alerts.acknowledged_by AS "acknowledgedBy",
+  alerts.acknowledgement_rationale AS "acknowledgementRationale",
+  alerts.resolved_at AS "resolvedAt", alerts.resolved_by AS "resolvedBy",
+  alerts.resolution_rationale AS "resolutionRationale"`;
 
 export class PostgresAlertRepository {
   constructor(private readonly pool: Pool) {}
@@ -34,13 +56,20 @@ export class PostgresAlertRepository {
     const alert = AlertJobPayloadSchema.parse(rawAlert);
     const inserted = await this.pool.query<AlertRow>(
       `INSERT INTO alerts
-        (alert_id, case_id, severity, kind, title, message, source_event_id, source_urls, created_at)
-       SELECT $1, cases.id, $3, $4, $5, $6, $7, $8::jsonb, $9
+        (alert_id, case_id, severity, kind, title, message, source_event_id, source_urls,
+         priority_run_id, deduplication_key, reason_codes, recommended_actions, created_at)
+       SELECT $1, cases.id, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11::jsonb, $12::jsonb, $13
        FROM cases WHERE cases.external_case_id = $2
        ON CONFLICT (alert_id) DO NOTHING
        RETURNING alert_id AS "alertId", $2::text AS "caseId", severity, kind, title, message,
          source_event_id AS "sourceEventId", source_urls AS "sourceUrls",
-         created_at AS "createdAt", acknowledged_at AS "acknowledgedAt"`,
+         priority_run_id AS "priorityRunId", deduplication_key AS "deduplicationKey",
+         reason_codes AS "reasonCodes", recommended_actions AS "recommendedActions",
+         status, created_at AS "createdAt", acknowledged_at AS "acknowledgedAt",
+         acknowledged_by AS "acknowledgedBy",
+         acknowledgement_rationale AS "acknowledgementRationale",
+         resolved_at AS "resolvedAt", resolved_by AS "resolvedBy",
+         resolution_rationale AS "resolutionRationale"`,
       [
         alert.alertId,
         alert.caseId,
@@ -50,6 +79,10 @@ export class PostgresAlertRepository {
         alert.message,
         alert.sourceEventId ?? null,
         JSON.stringify(alert.sourceUrls),
+        alert.priorityRunId ?? null,
+        alert.deduplicationKey ?? null,
+        JSON.stringify(alert.reasonCodes ?? []),
+        JSON.stringify(alert.recommendedActions ?? []),
         alert.createdAt,
       ],
     );
@@ -62,7 +95,16 @@ export class PostgresAlertRepository {
         `Case ${alert.caseId} was not found while persisting alert ${alert.alertId}.`,
       );
     }
-    const { acknowledgedAt: _acknowledgedAt, ...existingPayload } = existing;
+    const {
+      status: _status,
+      acknowledgedAt: _acknowledgedAt,
+      acknowledgedBy: _acknowledgedBy,
+      acknowledgementRationale: _acknowledgementRationale,
+      resolvedAt: _resolvedAt,
+      resolvedBy: _resolvedBy,
+      resolutionRationale: _resolutionRationale,
+      ...existingPayload
+    } = existing;
     if (!isDeepStrictEqual(existingPayload, alert)) {
       throw new Error(`Alert ID ${alert.alertId} was reused with different content.`);
     }
@@ -71,7 +113,8 @@ export class PostgresAlertRepository {
 
   async acknowledge(alertId: string, acknowledgedAt: string): Promise<PersistedAlert> {
     const result = await this.pool.query<AlertRow>(
-      `UPDATE alerts SET acknowledged_at = COALESCE(acknowledged_at, $2)
+      `UPDATE alerts SET acknowledged_at = COALESCE(acknowledged_at, $2),
+         status = CASE WHEN status = 'OPEN' THEN 'ACKNOWLEDGED' ELSE status END
        FROM cases
        WHERE alerts.alert_id = $1 AND cases.id = alerts.case_id
        RETURNING ${ALERT_COLUMNS}`,
@@ -113,11 +156,21 @@ function mapAlert(row: AlertRow): PersistedAlert {
     message: row.message,
     ...(row.sourceEventId ? { sourceEventId: row.sourceEventId } : {}),
     sourceUrls: row.sourceUrls,
+    ...(row.priorityRunId ? { priorityRunId: row.priorityRunId } : {}),
+    ...(row.deduplicationKey ? { deduplicationKey: row.deduplicationKey } : {}),
+    ...(row.priorityRunId ? { reasonCodes: row.reasonCodes } : {}),
+    ...(row.priorityRunId ? { recommendedActions: row.recommendedActions } : {}),
     createdAt: iso(row.createdAt),
   });
   return {
     ...alert,
+    status: row.status,
     acknowledgedAt: row.acknowledgedAt ? iso(row.acknowledgedAt) : null,
+    acknowledgedBy: row.acknowledgedBy,
+    acknowledgementRationale: row.acknowledgementRationale,
+    resolvedAt: row.resolvedAt ? iso(row.resolvedAt) : null,
+    resolvedBy: row.resolvedBy,
+    resolutionRationale: row.resolutionRationale,
   };
 }
 
