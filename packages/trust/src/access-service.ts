@@ -59,16 +59,28 @@ export class DemoSignatureVerifier implements TrustVerifierAdapter {
 }
 
 const ROLE_CAPABILITIES: Record<CredentialRole, readonly TrustCapability[]> = {
-  INVESTIGATOR: ['CASE_READ', 'CASE_WRITE', 'EVIDENCE_ANCHOR', 'IDENTITY_RESOLUTION_REQUEST'],
+  INVESTIGATOR: [
+    'CASE_READ',
+    'CASE_WRITE',
+    'EVIDENCE_ANCHOR',
+    'IDENTITY_RESOLUTION_REQUEST',
+    'COMMAND_CENTER_READ',
+  ],
   SUPERVISOR: [
     'CASE_READ',
     'CASE_WRITE',
     'EVIDENCE_ANCHOR',
     'IDENTITY_RESOLUTION_APPROVE',
     'AUDIT_READ',
+    'COMMAND_CENTER_READ',
   ],
-  AUDITOR: ['CASE_READ', 'EVIDENCE_ANCHOR', 'AUDIT_READ'],
-  LEA_OFFICER: ['CASE_READ', 'EVIDENCE_ANCHOR', 'IDENTITY_RESOLUTION_APPROVE'],
+  AUDITOR: ['CASE_READ', 'EVIDENCE_ANCHOR', 'AUDIT_READ', 'COMMAND_CENTER_READ'],
+  LEA_OFFICER: [
+    'CASE_READ',
+    'EVIDENCE_ANCHOR',
+    'IDENTITY_RESOLUTION_APPROVE',
+    'COMMAND_CENTER_READ',
+  ],
 };
 
 const CASE_BOUND_CAPABILITIES = new Set<TrustCapability>([
@@ -310,6 +322,7 @@ export class TrustAccessService {
       capabilities: [challenge.capability],
       purpose: challenge.purpose,
       ...(challenge.caseId ? { caseId: challenge.caseId } : {}),
+      caseIds: claims.caseIds,
       issuedAt: now.toISOString(),
       expiresAt: new Date(
         Math.min(now.getTime() + this.sessionTtlMs, credentialExpiry),

@@ -15,6 +15,7 @@ export const TrustCapabilitySchema = z.enum([
   'IDENTITY_RESOLUTION_REQUEST',
   'IDENTITY_RESOLUTION_APPROVE',
   'AUDIT_READ',
+  'COMMAND_CENTER_READ',
 ]);
 
 export const TrustPurposeSchema = z.enum([
@@ -120,6 +121,7 @@ export const TrustSessionSchema = z
     capabilities: z.array(TrustCapabilitySchema),
     purpose: TrustPurposeSchema,
     caseId: IdentifierSchema.optional(),
+    caseIds: z.array(IdentifierSchema).max(100).default([]),
     issuedAt: IsoDateTimeSchema,
     expiresAt: IsoDateTimeSchema,
   })

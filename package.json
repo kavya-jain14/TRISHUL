@@ -23,6 +23,7 @@
     "dev:api": "npm run dev --workspace @trishul/api",
     "dev:psp": "npm run dev --workspace @trishul/psp-sandbox",
     "dev:web": "npm run dev --workspace @trishul/web",
+    "demo:verify": "npm run build:packages && vitest run apps/api/test/command-center-flow.test.ts apps/psp-sandbox/test/app.test.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "npm run build:packages && vitest run",

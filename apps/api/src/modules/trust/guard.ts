@@ -45,7 +45,7 @@ export async function authorizeBearerRequest(
   return service.authorize(bearerToken(request), capability, caseId);
 }
 
-function bearerToken(request: FastifyRequest): string {
+export function bearerToken(request: FastifyRequest): string {
   const authorization = request.headers.authorization;
   const match =
     typeof authorization === 'string'
