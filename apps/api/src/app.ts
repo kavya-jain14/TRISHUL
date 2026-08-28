@@ -51,13 +51,15 @@ export interface BuildAppOptions {
   paymentRiskServiceToken?: string;
   enforceTrustAccess?: boolean;
   persistenceMode?: 'IN_MEMORY_DEVELOPMENT_ADAPTER' | 'POSTGRESQL';
+  corsOrigins?: true | string[];
+  syntheticDemoCaseIds?: readonly string[];
 }
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: options.logger ?? false });
 
   void app.register(cors, {
-    origin: true,
+    origin: options.corsOrigins ?? true,
     methods: ['GET', 'POST', 'OPTIONS'],
   });
 
@@ -95,7 +97,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const commandCenterService =
     options.commandCenterService ??
     new CommandCenterService(new InMemoryCommandCenterRepository(), caseService);
-  registerCommandCenterRoutes(app, commandCenterService, trustAccessService);
+  registerCommandCenterRoutes(app, commandCenterService, trustAccessService, {
+    syntheticDemoCaseIds: options.syntheticDemoCaseIds ?? [],
+  });
   registerCaseActionRoutes(app, caseActionService, trustAccessService);
   registerEvidenceAnchorRoutes(app, evidenceAnchorService);
   registerTrustRoutes(app, trustAccessService);
@@ -129,6 +133,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     phase: 'PHASE_7_COMMAND_CENTER_ALERTS',
     persistenceMode: options.persistenceMode ?? 'IN_MEMORY_DEVELOPMENT_ADAPTER',
     trustAccessMode: options.enforceTrustAccess ? 'ENFORCED' : 'OPTIONAL_DEVELOPMENT_ADAPTER',
+    demoProfile: options.syntheticDemoCaseIds?.length ? 'GOLDEN_SYNTHETIC' : 'DISABLED',
     doctrine: {
       intentInference: false,
       complaintAsBlacklist: false,
