@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../api/src/app.js';
 import { buildSandboxApp } from '../../psp-sandbox/src/app.js';
 import {
+  evaluateDemoPaymentRisk,
   loadCaseIntelligence,
   loadPredictionReadiness,
   runGoldenTraceDemo,
@@ -42,6 +43,10 @@ describe('golden complaint-to-trace integration', () => {
       const caseId = await runGoldenTraceDemo((message) => progress.push(message));
       const intelligence = await loadCaseIntelligence(caseId);
       const readiness = await loadPredictionReadiness(caseId);
+      const paymentRisk = await evaluateDemoPaymentRisk({
+        amountRupees: 50_000,
+        receiverReference: 'acct:demo-receiver',
+      });
 
       expect(caseId).toBe('case:complaint-golden-a');
       expect(intelligence.caseDetail.summary.state).toBe('PREDICT');
@@ -77,6 +82,14 @@ describe('golden complaint-to-trace integration', () => {
           ? readiness.forecast.geo.candidates[0]?.zoneId
           : null,
       ).toBe('zone-noida-sector-62');
+      expect(paymentRisk).toMatchObject({
+        receiverReference: 'acct:demo-receiver',
+        trustStatus: 'VERIFIED',
+        decision: 'STEP_UP',
+        stepUpStatus: 'NOT_PERFORMED',
+      });
+      expect(paymentRisk.muleState).not.toBe('CONFIRMED');
+      expect(paymentRisk.reasonCodes).toContain('VERIFIED_TRUST_DOES_NOT_OVERRIDE_RISK');
       expect(progress.at(-1)).toBe('Evidence-gated zone and time forecast ready');
     } finally {
       await Promise.all([api.close(), sandbox.close()]);

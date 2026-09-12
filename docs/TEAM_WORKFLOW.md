@@ -2,14 +2,13 @@
 
 ## Ownership
 
-| Member   | Primary responsibility                                                                                                       | Branches                                                                             |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Kavya    | Product lead; contracts; state machine; graph/exposure; evidence gate; prediction orchestration; integration and frontend QA | `feature/intelligence-core`, `integration/*`, `qa/*`                                 |
-| Fuzail   | Provider ledger; resolver; trace workers; alerts; reliability                                                                | `feature/trace-ledger`, `feature/provider-sandbox`, `feature/alerts-workers`         |
-| Vatsal   | Auth/roles; PrivacyPass; identity resolution; audit validators                                                               | `feature/trust-access`, `feature/identity-resolution`, `feature/blockchain-registry` |
-| Ujjwal   | Frontend lead; design system; Payment Risk/Verify; Command Center                                                            | `feature/payment-risk-ui`, `feature/command-center`, `feature/frontend-shell`        |
-| Sandhya  | Complaint/case service; Case Intelligence graph and timeline                                                                 | `feature/case-service`, `feature/case-intelligence`                                  |
-| Vanshika | Exit/Evidence Gate/Geo/Time UI and responsive polish                                                                         | `feature/geo-prediction`                                                             |
+| Member | Primary responsibility                                                                                                       | Branches                                                                  |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Kavya  | Product lead; product doctrine; intelligence and prediction; UI/UX direction; integration; final architecture and release QA | `feature/intelligence-*`, `feature/*-ui-*`, `integration/*`, `qa/*`       |
+| Fuzail | System architecture; API and persistence; provider ledger; trust and audit; workers and alerts; UI/UX implementation support | `feature/backend-*`, `feature/*-ui-*`, `feature/trace-*`, `integration/*` |
+
+Kavya and Fuzail jointly own the complete product surface. Product, UI/UX, backend, data, trust,
+audit, worker and architecture changes require one of them as author and the other as reviewer.
 
 ## Starting work
 
@@ -30,7 +29,9 @@ git commit -m "type(scope): concise change"
 git push -u origin feature/your-assigned-branch
 ```
 
-Open a PR into `main`, request the module owner's review, and do not merge until CI passes. Pull `main` before beginning a new task. When a shared contract changes, update its tests and notify every dependent owner before they wire UI or backend code.
+Open a PR into `main`, request review from the other owner, and do not merge until CI passes. Pull
+`main` before beginning a new task. When a shared contract changes, update its tests and document
+every affected UI, API and worker consumer in the PR.
 
 ## Commit prefixes
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AccountExposureState,
   CaseDetail,
@@ -9,9 +9,11 @@ import type {
   GraphEdge,
   GraphSnapshot,
   MuleAssessmentSnapshot,
+  PaymentRiskAssessment,
 } from '@trishul/contracts';
 import {
   ApiError,
+  evaluateDemoPaymentRisk,
   loadCaseIntelligence,
   loadPredictionReadiness,
   runGoldenTraceDemo,
@@ -20,31 +22,26 @@ import {
 
 type ApiState = 'checking' | 'ready' | 'unavailable';
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
+type WorkspaceKey = 'command' | 'verify' | 'trace' | 'evidence' | 'intervene' | 'audit';
 
 interface SystemManifest {
   product: string;
   phase: string;
+  persistenceMode?: string;
+  trustAccessMode?: string;
   capabilities: string[];
 }
 
-const navigation = [
-  'Command Center',
-  'Payment Risk / Verify',
-  'Case Intelligence',
-  'Geo / Prediction',
-  'Secure Resolution',
-  'Audit / Outcome',
-] as const;
-
-const foundationItems = [
-  ['Contracts', 'Runtime validated'],
-  ['Evidence', 'Provenance required'],
-  ['TRACE', 'Idempotent and versioned'],
-  ['Demo data', 'Deterministic simulator'],
+const workflow = [
+  { key: 'verify', index: '01', label: 'Intake & verify' },
+  { key: 'trace', index: '02', label: 'Bounded trace' },
+  { key: 'evidence', index: '03', label: 'Evidence gate' },
+  { key: 'intervene', index: '04', label: 'Intervention' },
+  { key: 'audit', index: '05', label: 'Audit & outcome' },
 ] as const;
 
 function formatMoney(amountMinor?: number) {
-  if (amountMinor === undefined) return 'No amount';
+  if (amountMinor === undefined) return 'Not available';
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
@@ -52,66 +49,376 @@ function formatMoney(amountMinor?: number) {
   }).format(amountMinor / 100);
 }
 
-function CaseIntelligence({ apiBase }: { apiBase: string }) {
+function humanize(value: string) {
+  return value
+    .replaceAll('_', ' ')
+    .toLowerCase()
+    .replace(/^./, (character) => character.toUpperCase());
+}
+
+function statusFor(key: WorkspaceKey, active: WorkspaceKey) {
+  if (key === active) return 'ACTIVE';
+  if (key === 'verify') return 'COMPLETE';
+  if (key === 'trace')
+    return ['evidence', 'intervene', 'audit'].includes(active) ? 'COMPLETE' : 'READY';
+  if (key === 'evidence') return ['intervene', 'audit'].includes(active) ? 'COMPLETE' : 'READY';
+  if (key === 'audit') return 'RECORDING';
+  return 'WAITING';
+}
+
+function OperatorHeader({ apiState, onHome }: { apiState: ApiState; onHome: () => void }) {
+  return (
+    <header className="operator-header">
+      <button
+        aria-label="Open Command Center"
+        className="brand-lockup"
+        onClick={onHome}
+        type="button"
+      >
+        <span aria-hidden="true" className="brand-mark">
+          Ψ
+        </span>
+        <span>
+          <strong>TRISHUL</strong>
+          <small>FINANCIAL INTELLIGENCE LAYER</small>
+        </span>
+      </button>
+      <div aria-live="polite" className="network-state">
+        <span className={`network-dot ${apiState}`} />
+        <strong>
+          {apiState === 'ready'
+            ? 'SIMULATED PROVIDER NETWORK'
+            : apiState === 'checking'
+              ? 'CHECKING PROVIDER NETWORK'
+              : 'PROVIDER NETWORK OFFLINE'}
+        </strong>
+        <i>•</i>
+        <span>POLICY v1.8</span>
+      </div>
+      <div className="operator-identity">
+        <span aria-hidden="true">KJ</span>
+        <div>
+          <strong>Kavya Jain</strong>
+          <small>INVESTIGATOR · DEMO</small>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function WorkflowRail({
+  active,
+  onNavigate,
+}: {
+  active: WorkspaceKey;
+  onNavigate: (key: WorkspaceKey) => void;
+}) {
+  return (
+    <aside className="workflow-rail">
+      <div className="active-case">
+        <span>ACTIVE CASE</span>
+        <strong>TR-2026-0142</strong>
+        <small>Priority 92</small>
+      </div>
+      <nav aria-label="Case workflow">
+        {workflow.map((item) => {
+          const current = item.key === active;
+          return (
+            <button
+              aria-current={current ? 'step' : undefined}
+              className={current ? 'workflow-step active' : 'workflow-step'}
+              key={item.key}
+              onClick={() => onNavigate(item.key)}
+              type="button"
+            >
+              <span>{item.index}</span>
+              <span>
+                <strong>{item.label}</strong>
+                <small>{statusFor(item.key, active)}</small>
+              </span>
+              <i aria-hidden="true" />
+            </button>
+          );
+        })}
+      </nav>
+      <div className="authority-boundary">
+        <span>AUTHORITY BOUNDARY</span>
+        <p>Provider evidence only. No autonomous freezing or identity disclosure.</p>
+      </div>
+    </aside>
+  );
+}
+
+function LoadingState({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="intentional-state loading-state">
+      <span className="pulse-dot" />
+      <div>
+        <strong>{title}</strong>
+        <p>{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="intentional-state error-state">
+      <span>REQUEST STOPPED</span>
+      <strong>Evidence workspace unavailable</strong>
+      <p>{message}</p>
+      {onRetry && (
+        <button onClick={onRetry} type="button">
+          Retry verified scenario
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface PositionedNode {
+  id: string;
+  label: string;
+  type: string;
+  x: number;
+  y: number;
+}
+
+function graphPositions(graph: GraphSnapshot): PositionedNode[] {
+  const incoming = new Map<string, number>();
+  const level = new Map<string, number>();
+  graph.nodes.forEach((node) => incoming.set(node.nodeId, 0));
+  graph.edges.forEach((edge) => {
+    incoming.set(edge.toNodeId, (incoming.get(edge.toNodeId) ?? 0) + 1);
+  });
+  const roots = graph.nodes.filter((node) => (incoming.get(node.nodeId) ?? 0) === 0);
+  roots.forEach((node) => level.set(node.nodeId, 0));
+  for (let pass = 0; pass < graph.nodes.length; pass += 1) {
+    graph.edges.forEach((edge) => {
+      const fromLevel = level.get(edge.fromNodeId);
+      if (fromLevel !== undefined) {
+        level.set(edge.toNodeId, Math.max(level.get(edge.toNodeId) ?? 0, fromLevel + 1));
+      }
+    });
+  }
+  graph.nodes.forEach((node) => {
+    if (!level.has(node.nodeId)) level.set(node.nodeId, 0);
+  });
+  const maxLevel = Math.max(1, ...level.values());
+  const byLevel = new Map<number, typeof graph.nodes>();
+  graph.nodes.forEach((node) => {
+    const nodeLevel = level.get(node.nodeId) ?? 0;
+    byLevel.set(nodeLevel, [...(byLevel.get(nodeLevel) ?? []), node]);
+  });
+  return graph.nodes.map((node) => {
+    const nodeLevel = level.get(node.nodeId) ?? 0;
+    const group = byLevel.get(nodeLevel) ?? [node];
+    const index = group.findIndex((candidate) => candidate.nodeId === node.nodeId);
+    return {
+      id: node.nodeId,
+      label: node.label,
+      type: node.type,
+      x: 10 + (nodeLevel / maxLevel) * 72,
+      y: group.length === 1 ? 48 : 22 + (index / (group.length - 1)) * 54,
+    };
+  });
+}
+
+function MoneyFlowGraph({
+  graph,
+  exposureStates,
+  selectedNodeId,
+  selectedEdgeId,
+  onSelectNode,
+  onSelectEdge,
+}: {
+  graph: GraphSnapshot;
+  exposureStates: AccountExposureState[];
+  selectedNodeId: string | null;
+  selectedEdgeId: string | null;
+  onSelectNode: (id: string) => void;
+  onSelectEdge: (id: string) => void;
+}) {
+  const positions = useMemo(() => graphPositions(graph), [graph]);
+  const positionById = useMemo(
+    () => new Map(positions.map((node) => [node.id, node])),
+    [positions],
+  );
+  const exposureById = useMemo(
+    () => new Map(exposureStates.map((state) => [state.accountId, state])),
+    [exposureStates],
+  );
+
+  return (
+    <div aria-label="Provider-confirmed money-flow graph" className="money-flow-canvas">
+      <svg
+        aria-hidden="true"
+        className="graph-links"
+        preserveAspectRatio="none"
+        viewBox="0 0 100 100"
+      >
+        {graph.edges.map((edge) => {
+          const from = positionById.get(edge.fromNodeId);
+          const to = positionById.get(edge.toNodeId);
+          if (!from || !to) return null;
+          const isSelected = edge.edgeId === selectedEdgeId;
+          return (
+            <g key={edge.edgeId} onClick={() => onSelectEdge(edge.edgeId)}>
+              <line className="graph-link-hitbox" x1={from.x} x2={to.x} y1={from.y} y2={to.y} />
+              <line
+                className={isSelected ? 'graph-link selected' : 'graph-link'}
+                x1={from.x}
+                x2={to.x}
+                y1={from.y}
+                y2={to.y}
+              />
+            </g>
+          );
+        })}
+        <line className="graph-link boundary" x1="82" x2="94" y1="72" y2="72" />
+      </svg>
+
+      {positions.map((node, index) => {
+        const exposure = exposureById.get(node.id);
+        const selected = node.id === selectedNodeId;
+        return (
+          <button
+            className={selected ? 'graph-node selected' : 'graph-node'}
+            key={node.id}
+            onClick={() => onSelectNode(node.id)}
+            style={{ left: `${node.x}%`, top: `${node.y}%` }}
+            type="button"
+          >
+            <small>{index === 0 ? 'ORIGIN' : node.type}</small>
+            <strong>{node.label}</strong>
+            <span>
+              {exposure
+                ? `${formatMoney(exposure.minimumAttributableMinor)}–${formatMoney(exposure.maximumAttributableMinor)}`
+                : node.type === 'ACCOUNT'
+                  ? 'Provider observed'
+                  : humanize(node.type)}
+            </span>
+          </button>
+        );
+      })}
+
+      <div className="visibility-node">
+        <small>VISIBILITY BOUNDARY</small>
+        <strong>No authorised events</strong>
+      </div>
+    </div>
+  );
+}
+
+function EvidenceInspector({
+  nodeId,
+  edge,
+  exposure,
+  risk,
+}: {
+  nodeId: string | null;
+  edge: GraphEdge | null;
+  exposure: AccountExposureState | null;
+  risk: MuleAssessmentSnapshot | null;
+}) {
+  const reasons = risk?.reasonCodes.slice(0, 3) ?? [];
+  return (
+    <aside className="evidence-inspector">
+      <span className="section-label">SELECTED EVIDENCE NODE</span>
+      <h3>{nodeId ?? 'Select a node'}</h3>
+      <p>Attributable exposure</p>
+      <div className="inspector-facts">
+        <div>
+          <span>EXPOSURE</span>
+          <strong>
+            {exposure
+              ? `${formatMoney(exposure.minimumAttributableMinor)}–${formatMoney(exposure.maximumAttributableMinor)}`
+              : 'Pending'}
+          </strong>
+        </div>
+        <div>
+          <span>RISK STATE</span>
+          <strong>{risk ? humanize(risk.state) : 'Not assessed'}</strong>
+        </div>
+        <div className="wide">
+          <span>EVIDENCE STATE</span>
+          <strong>{edge ? humanize(edge.provenance.evidenceState) : 'Select an edge'}</strong>
+        </div>
+      </div>
+      <div className="risk-reasons">
+        <span>WHY OPERATIONAL RISK IS ELEVATED</span>
+        {reasons.length ? (
+          reasons.map((reason, index) => (
+            <div key={reason}>
+              <b>{String(index + 1).padStart(2, '0')}</b>
+              <p>
+                <strong>{humanize(reason)}</strong>
+                <small>
+                  {index === 0
+                    ? 'Observed behaviour differs from the account baseline.'
+                    : index === 1
+                      ? 'Network evidence connects this node to the active investigation.'
+                      : 'Fund movement increases the active intervention priority.'}
+                </small>
+              </p>
+            </div>
+          ))
+        ) : (
+          <p className="no-risk-reasons">
+            No risk reason is promoted without a current, version-matched assessment.
+          </p>
+        )}
+      </div>
+      {edge && (
+        <div className="edge-provenance">
+          <span>SELECTED EDGE PROVENANCE</span>
+          <strong>{edge.provenance.sourceName}</strong>
+          <small>{edge.provenance.sourceEventId}</small>
+          <small>{new Date(edge.provenance.observedAt).toLocaleString('en-IN')}</small>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function TraceWorkspace({ apiBase }: { apiBase: string }) {
   const [caseId, setCaseId] = useState('case:complaint-golden-a');
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   const [graph, setGraph] = useState<GraphSnapshot | null>(null);
   const [graphPending, setGraphPending] = useState(false);
   const [exposureStates, setExposureStates] = useState<AccountExposureState[]>([]);
-  const [exposurePending, setExposurePending] = useState(false);
   const [riskAssessments, setRiskAssessments] = useState<MuleAssessmentSnapshot[]>([]);
   const [loadState, setLoadState] = useState<LoadState>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [demoProgress, setDemoProgress] = useState('');
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const bootstrapped = useRef(false);
 
-  const selectedEdge = useMemo(
-    () => graph?.edges.find((edge) => edge.edgeId === selectedEdgeId) ?? null,
-    [graph, selectedEdgeId],
-  );
-  const selectedExposure = useMemo(
-    () => exposureStates.find((state) => state.accountId === selectedAccountId) ?? null,
-    [exposureStates, selectedAccountId],
-  );
-  const selectedRisk = useMemo(
-    () =>
-      riskAssessments.find(
-        (assessment) =>
-          assessment.accountId === selectedAccountId &&
-          assessment.graphVersion === caseDetail?.summary.graphVersion,
-      ) ?? null,
-    [caseDetail?.summary.graphVersion, riskAssessments, selectedAccountId],
-  );
+  const apply = (result: Awaited<ReturnType<typeof loadCaseIntelligence>>) => {
+    setCaseDetail(result.caseDetail);
+    setGraph(result.graph);
+    setGraphPending(result.graphPending);
+    setExposureStates(result.exposure?.states ?? []);
+    setRiskAssessments(result.riskAssessments);
+    setSelectedEdgeId(result.graph?.edges.at(-1)?.edgeId ?? null);
+    setSelectedAccountId(
+      result.exposure?.states.at(-1)?.accountId ?? result.graph?.nodes.at(-1)?.nodeId ?? null,
+    );
+    setLoadState('ready');
+  };
 
   const load = async (targetCaseId = caseId) => {
     setLoadState('loading');
     setErrorMessage('');
     try {
-      const result = await loadCaseIntelligence(targetCaseId, apiBase);
-      setCaseDetail(result.caseDetail);
-      setGraph(result.graph);
-      setGraphPending(result.graphPending);
-      setExposureStates(result.exposure?.states ?? []);
-      setExposurePending(result.exposurePending);
-      setRiskAssessments(result.riskAssessments);
-      setSelectedEdgeId(result.graph?.edges[0]?.edgeId ?? null);
-      setSelectedAccountId(
-        result.exposure?.states[0]?.accountId ??
-          result.graph?.nodes.find((node) => node.type === 'ACCOUNT')?.nodeId ??
-          null,
-      );
-      setLoadState('ready');
+      apply(await loadCaseIntelligence(targetCaseId, apiBase));
     } catch (error) {
-      setCaseDetail(null);
-      setGraph(null);
-      setGraphPending(false);
-      setExposureStates([]);
-      setExposurePending(false);
-      setRiskAssessments([]);
       setLoadState('error');
       setErrorMessage(
-        error instanceof ApiError ? `${error.code}: ${error.message}` : 'Case could not be loaded.',
+        error instanceof ApiError
+          ? `${error.code}: ${error.message}`
+          : 'The case could not be loaded.',
       );
     }
   };
@@ -122,351 +429,167 @@ function CaseIntelligence({ apiBase }: { apiBase: string }) {
     try {
       const loadedCaseId = await runGoldenTraceDemo(setDemoProgress, apiBase);
       setCaseId(loadedCaseId);
-      await load(loadedCaseId);
+      apply(await loadCaseIntelligence(loadedCaseId, apiBase));
     } catch (error) {
       setLoadState('error');
       setErrorMessage(
         error instanceof ApiError
           ? `${error.code}: ${error.message}`
-          : 'The deterministic trace demo could not complete.',
+          : 'The verified trace scenario could not complete.',
       );
     }
   };
 
+  useEffect(() => {
+    if (bootstrapped.current) return;
+    bootstrapped.current = true;
+    void runDemo();
+  }, []);
+
+  const selectedEdge = graph?.edges.find((edge) => edge.edgeId === selectedEdgeId) ?? null;
+  const selectedExposure =
+    exposureStates.find((state) => state.accountId === selectedAccountId) ?? null;
+  const selectedRisk =
+    riskAssessments.find(
+      (assessment) =>
+        assessment.accountId === selectedAccountId &&
+        assessment.graphVersion === caseDetail?.summary.graphVersion,
+    ) ?? null;
+  const outgoingAccounts = new Set(graph?.edges.map((edge) => edge.fromNodeId) ?? []);
+  const terminalExposure = exposureStates.filter((state) => !outgoingAccounts.has(state.accountId));
+  const totalMinimum = terminalExposure.reduce(
+    (sum, state) => sum + state.minimumAttributableMinor,
+    0,
+  );
+  const totalMaximum = terminalExposure.reduce(
+    (sum, state) => sum + state.maximumAttributableMinor,
+    0,
+  );
+
   return (
-    <section className="case-workspace">
-      <div className="case-toolbar">
+    <section className="trace-workspace workspace-screen">
+      <div className="workspace-title-row">
         <div>
-          <span className="section-label">Complaint-led investigation</span>
-          <h2>Case Intelligence</h2>
-          <p>Every visible edge below is returned by TRACE with provider provenance.</p>
+          <span className="case-kicker">CASE / CMP-2841</span>
+          <h1>Where did the reported funds move?</h1>
         </div>
-        <div className="case-controls">
-          <label htmlFor="case-id">Case ID</label>
+        <div className="case-summary-strip">
           <div>
-            <input
-              id="case-id"
-              onChange={(event) => setCaseId(event.target.value)}
-              value={caseId}
-            />
-            <button disabled={loadState === 'loading'} onClick={() => void load()} type="button">
-              Load case
-            </button>
+            <span>REPORTED</span>
+            <strong>
+              {formatMoney(caseDetail?.complaint.reportedAmount.amountMinor ?? 5_000_000)}
+            </strong>
           </div>
-          <button
-            className="secondary-action"
-            disabled={loadState === 'loading'}
-            onClick={() => void runDemo()}
-            type="button"
-          >
-            Run deterministic trace demo
-          </button>
+          <div>
+            <span>RECEIVED</span>
+            <strong>
+              {caseDetail
+                ? new Date(caseDetail.complaint.reportedAt).toLocaleTimeString('en-IN', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : '10:30 IST'}
+            </strong>
+          </div>
+          <div>
+            <span>STATE</span>
+            <strong className="active-copy">
+              {caseDetail ? humanize(caseDetail.summary.state) : 'Active'}
+            </strong>
+          </div>
         </div>
+      </div>
+
+      <div className="case-query-bar">
+        <label htmlFor="trace-case-id">CASE REFERENCE</label>
+        <input
+          id="trace-case-id"
+          onChange={(event) => setCaseId(event.target.value)}
+          value={caseId}
+        />
+        <button disabled={loadState === 'loading'} onClick={() => void load()} type="button">
+          LOAD CASE
+        </button>
+        <button
+          className="ghost-action"
+          disabled={loadState === 'loading'}
+          onClick={() => void runDemo()}
+          type="button"
+        >
+          RESET VERIFIED DEMO
+        </button>
       </div>
 
       {loadState === 'loading' && (
-        <div className="intentional-state loading-state">
-          <span className="status-dot" />
-          <div>
-            <strong>Building from backend evidence</strong>
-            <p>{demoProgress || 'Loading case and graph state...'}</p>
-          </div>
-        </div>
+        <LoadingState
+          detail={demoProgress || 'Resolving transaction and expanding the bounded graph…'}
+          title="Building from provider evidence"
+        />
       )}
-
       {loadState === 'error' && (
-        <div className="intentional-state error-state">
-          <strong>Case Intelligence unavailable</strong>
-          <p>{errorMessage}</p>
-        </div>
+        <ErrorState message={errorMessage} onRetry={() => void runDemo()} />
+      )}
+      {loadState === 'ready' && graphPending && (
+        <ErrorState message="TRACE has no graph for this case yet. The interface will not invent nodes or edges." />
       )}
 
-      {loadState === 'idle' && (
-        <div className="intentional-state empty-state">
-          <strong>No case loaded</strong>
-          <p>Load an existing case or run the labelled synthetic provider scenario.</p>
-        </div>
-      )}
-
-      {loadState === 'ready' && caseDetail && (
-        <>
-          <div className="case-facts">
-            <article>
-              <span>Case state</span>
-              <strong>{caseDetail.summary.state.replaceAll('_', ' ')}</strong>
-            </article>
-            <article>
-              <span>Transaction anchor</span>
-              <strong>{caseDetail.summary.originalTransactionRef}</strong>
-            </article>
-            <article>
-              <span>Resolved beneficiary</span>
-              <strong>{caseDetail.resolvedBeneficiaryAccount ?? 'Awaiting resolution'}</strong>
-            </article>
-            <article>
-              <span>Ledger / risk snapshots</span>
-              <strong>
-                {caseDetail.providerEventCount} / {caseDetail.riskAssessmentCount}
-              </strong>
-            </article>
+      {loadState === 'ready' && graph && (
+        <section className="trace-frame">
+          <div className="trace-legend">
+            <span>
+              <i className="solid-line" /> SOLID EDGE = PROVIDER EVENT
+            </span>
+            <span>
+              <i className="range-line" /> RANGE = COMMINGLING UNCERTAINTY
+            </span>
+            <span>
+              <i className="dashed-line" /> DASHED = VISIBILITY BOUNDARY
+            </span>
+            <strong>Neo4j view · contract validated</strong>
           </div>
-
-          {graphPending && (
-            <div className="intentional-state pending-state">
-              <strong>TRACE has not produced a graph yet</strong>
-              <p>
-                The case is real, but the UI will not invent nodes or edges. Run TRACE after
-                provider events arrive.
-              </p>
-            </div>
-          )}
-
-          {graph && (
-            <>
-              <div className="coverage-boundary">
-                <span>Observed coverage boundary</span>
-                <strong>{graph.coverageBoundary}</strong>
-                <small>Graph version {graph.graphVersion}</small>
-              </div>
-
-              <div className="graph-layout">
-                <article className="trace-panel">
-                  <div className="card-heading">
-                    <div>
-                      <span className="section-label">Observed money trail</span>
-                      <h3>{graph.edges.length} provenance-backed edges</h3>
-                    </div>
-                    <span className="version-badge">v{graph.graphVersion}</span>
-                  </div>
-                  <div className="edge-list">
-                    {graph.edges.map((edge, index) => (
-                      <button
-                        className={
-                          edge.edgeId === selectedEdgeId ? 'edge-row selected' : 'edge-row'
-                        }
-                        key={edge.edgeId}
-                        onClick={() => setSelectedEdgeId(edge.edgeId)}
-                        type="button"
-                      >
-                        <span className="edge-index">{String(index + 1).padStart(2, '0')}</span>
-                        <span className="edge-route">
-                          <strong>{edge.fromNodeId}</strong>
-                          <small>{edge.type.replaceAll('_', ' ')}</small>
-                          <strong>{edge.toNodeId}</strong>
-                        </span>
-                        <span className="edge-amount">{formatMoney(edge.amount?.amountMinor)}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="node-inventory">
-                    <span>Observed nodes - select an account for intelligence</span>
-                    <div>
-                      {graph.nodes.map((node) => (
-                        <button
-                          className={node.nodeId === selectedAccountId ? 'selected' : ''}
-                          disabled={node.type !== 'ACCOUNT'}
-                          key={node.nodeId}
-                          onClick={() => setSelectedAccountId(node.nodeId)}
-                          type="button"
-                        >
-                          {node.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </article>
-
-                <ProvenancePanel edge={selectedEdge} />
-              </div>
-
-              {exposurePending && (
-                <div className="intentional-state pending-state">
-                  <strong>Exposure has not been calculated for graph v{graph.graphVersion}</strong>
-                  <p>
-                    Known-clean balance evidence is required. The UI will not turn observed outgoing
-                    value into an exact fraud amount.
-                  </p>
+          <div className="trace-main">
+            <article className="graph-panel">
+              <div className="graph-heading">
+                <div>
+                  <span className="mint section-label">BOUNDED MONEY-FLOW GRAPH</span>
+                  <h2>{graph.edges.length} verified downstream events</h2>
                 </div>
-              )}
-
-              {exposureStates.length > 0 && (
-                <div className="intelligence-layout">
-                  <ExposurePanel
-                    onSelect={setSelectedAccountId}
-                    selectedAccountId={selectedAccountId}
-                    states={exposureStates}
-                  />
-                  <RiskPanel
-                    assessment={selectedRisk}
-                    exposure={selectedExposure}
-                    selectedAccountId={selectedAccountId}
-                  />
+                <div>
+                  <span>CURRENT ATTRIBUTABLE EXPOSURE</span>
+                  <strong>
+                    {formatMoney(totalMinimum)}–{formatMoney(totalMaximum)}
+                  </strong>
                 </div>
-              )}
-            </>
-          )}
-        </>
+              </div>
+              <MoneyFlowGraph
+                exposureStates={exposureStates}
+                graph={graph}
+                onSelectEdge={setSelectedEdgeId}
+                onSelectNode={setSelectedAccountId}
+                selectedEdgeId={selectedEdgeId}
+                selectedNodeId={selectedAccountId}
+              />
+              <div className="coverage-footer">
+                <span>OBSERVED COVERAGE</span>
+                <strong>
+                  {graph.coverageBoundary ?? 'All authorised provider events exhausted'}
+                </strong>
+                <small>
+                  Graph v{graph.graphVersion} ·{' '}
+                  {new Date(graph.generatedAt).toLocaleString('en-IN')}
+                </small>
+              </div>
+            </article>
+            <EvidenceInspector
+              edge={selectedEdge}
+              exposure={selectedExposure}
+              nodeId={selectedAccountId}
+              risk={selectedRisk}
+            />
+          </div>
+        </section>
       )}
     </section>
-  );
-}
-
-function ExposurePanel({
-  states,
-  selectedAccountId,
-  onSelect,
-}: {
-  states: AccountExposureState[];
-  selectedAccountId: string | null;
-  onSelect: (accountId: string) => void;
-}) {
-  return (
-    <article className="exposure-panel">
-      <div className="card-heading">
-        <div>
-          <span className="section-label">Commingled-funds accounting</span>
-          <h3>Attributable exposure ranges</h3>
-        </div>
-        <span className="version-badge">{states[0]?.methodVersion}</span>
-      </div>
-      <p className="panel-note">
-        Observed movement is factual. The range states what may be attributable after known-clean
-        funds are considered.
-      </p>
-      <div className="exposure-list">
-        {states.map((state) => (
-          <button
-            aria-pressed={state.accountId === selectedAccountId}
-            className={state.accountId === selectedAccountId ? 'selected' : ''}
-            key={state.exposureStateId}
-            onClick={() => onSelect(state.accountId)}
-            type="button"
-          >
-            <span>
-              <strong>{state.accountId}</strong>
-              <small>graph v{state.graphVersion}</small>
-            </span>
-            <span>
-              <small>Observed outgoing</small>
-              <strong>{formatMoney(state.observedOutgoingMinor)}</strong>
-            </span>
-            <span>
-              <small>Attributable range</small>
-              <strong>
-                {formatMoney(state.minimumAttributableMinor)} to{' '}
-                {formatMoney(state.maximumAttributableMinor)}
-              </strong>
-            </span>
-          </button>
-        ))}
-      </div>
-    </article>
-  );
-}
-
-function RiskPanel({
-  assessment,
-  exposure,
-  selectedAccountId,
-}: {
-  assessment: MuleAssessmentSnapshot | null;
-  exposure: AccountExposureState | null;
-  selectedAccountId: string | null;
-}) {
-  return (
-    <article className="risk-panel">
-      <span className="section-label">Explainable mule / network risk</span>
-      <h3>{selectedAccountId ?? 'Select an account'}</h3>
-      {exposure && (
-        <div className="selected-range">
-          <span>Defensible attributable range</span>
-          <strong>
-            {formatMoney(exposure.minimumAttributableMinor)} to{' '}
-            {formatMoney(exposure.maximumAttributableMinor)}
-          </strong>
-        </div>
-      )}
-      {assessment ? (
-        <>
-          <div className={`risk-state ${assessment.state.toLowerCase()}`}>
-            <span>{assessment.state.replaceAll('_', ' ')}</span>
-            <strong>{assessment.score}/100</strong>
-          </div>
-          <p className="confirmation-boundary">
-            {assessment.state === 'CONFIRMED' && assessment.trustedOutcome.status === 'CONFIRMED'
-              ? `Confirmed only by trusted outcome ${assessment.trustedOutcome.institutionalReference}.`
-              : 'This is an explainable recommendation, not a confirmed mule finding.'}
-          </p>
-          <dl className="risk-features">
-            <div>
-              <dt>Pass-through</dt>
-              <dd>{Math.round(assessment.features.behaviour.passThrough * 100)}%</dd>
-            </div>
-            <div>
-              <dt>Network proximity</dt>
-              <dd>{Math.round(assessment.features.network.reportedNetworkProximity * 100)}%</dd>
-            </div>
-            <div>
-              <dt>Rapid forwarding</dt>
-              <dd>{Math.round(assessment.features.movement.rapidForwarding * 100)}%</dd>
-            </div>
-            <div>
-              <dt>Signal source</dt>
-              <dd>{assessment.signalProvenance.sourceName}</dd>
-            </div>
-          </dl>
-          <div className="reason-codes">
-            {assessment.reasonCodes.map((reason) => (
-              <span key={reason}>{reason.replaceAll('_', ' ')}</span>
-            ))}
-          </div>
-        </>
-      ) : (
-        <div className="risk-empty">
-          <strong>No current risk assessment for this account</strong>
-          <p>One complaint or one rapid transfer is never promoted to a mule verdict.</p>
-        </div>
-      )}
-    </article>
-  );
-}
-
-function ProvenancePanel({ edge }: { edge: GraphEdge | null }) {
-  return (
-    <article className="provenance-panel">
-      <span className="section-label">Edge evidence</span>
-      <h3>{edge ? edge.edgeId : 'Select an edge'}</h3>
-      {edge ? (
-        <dl>
-          <div>
-            <dt>Source</dt>
-            <dd>{edge.provenance.sourceName}</dd>
-          </div>
-          <div>
-            <dt>Source type</dt>
-            <dd>{edge.provenance.sourceType}</dd>
-          </div>
-          <div>
-            <dt>Provider event</dt>
-            <dd>{edge.provenance.sourceEventId}</dd>
-          </div>
-          <div>
-            <dt>Evidence state</dt>
-            <dd>{edge.provenance.evidenceState}</dd>
-          </div>
-          <div>
-            <dt>Occurred</dt>
-            <dd>{new Date(edge.occurredAt).toLocaleString('en-IN')}</dd>
-          </div>
-          <div>
-            <dt>Observed</dt>
-            <dd>{new Date(edge.provenance.observedAt).toLocaleString('en-IN')}</dd>
-          </div>
-        </dl>
-      ) : (
-        <p>Choose an observed transfer to inspect its source and timestamp.</p>
-      )}
-    </article>
   );
 }
 
@@ -479,14 +602,12 @@ function GateCard({
 }) {
   return (
     <article className={`gate-card ${decision.decision.toLowerCase()}`}>
-      <div className="gate-card-heading">
-        <div>
-          <span className="section-label">{dimension} evidence</span>
-          <h3>{decision.decision}</h3>
-        </div>
-        <span>{decision.coverageState}</span>
+      <div>
+        <span>{dimension.toUpperCase()} EVIDENCE</span>
+        <strong>{decision.decision}</strong>
+        <small>{humanize(decision.coverageState)}</small>
       </div>
-      <div className="coverage-meter" aria-label={`${dimension} coverage score`}>
+      <div className="coverage-meter">
         <span style={{ width: `${decision.coverageScore * 100}%` }} />
       </div>
       <dl>
@@ -499,380 +620,180 @@ function GateCard({
           <dd>{Math.round(decision.predictionStability * 100)}%</dd>
         </div>
         <div>
-          <dt>Evidence source</dt>
+          <dt>Source</dt>
           <dd>{decision.provenance.sourceName}</dd>
         </div>
       </dl>
-      <div className="reason-codes">
-        {decision.reasonCodes.map((reason) => (
-          <span key={reason}>{reason.replaceAll('_', ' ')}</span>
-        ))}
-      </div>
+      <p>{decision.reasonCodes.map(humanize).join(' · ')}</p>
       {decision.missingEvidence.length > 0 && (
-        <div className="missing-evidence">
-          <strong>Evidence still required</strong>
-          <ul>
-            {decision.missingEvidence.map((reason) => (
-              <li key={reason}>{reason.replaceAll('_', ' ')}</li>
-            ))}
-          </ul>
-        </div>
+        <small>Missing: {decision.missingEvidence.map(humanize).join(' · ')}</small>
       )}
     </article>
   );
 }
 
-function formatTimeBucket(bucket: string) {
-  return (
-    {
-      UNDER_30_MIN: 'Under 30 min',
-      '30_TO_60_MIN': '30–60 min',
-      '1_TO_2_HOURS': '1–2 hours',
-      '2_TO_6_HOURS': '2–6 hours',
-      '6_TO_24_HOURS': '6–24 hours',
-    }[bucket] ?? bucket.replaceAll('_', ' ')
-  );
-}
-
 function ForecastPanel({ forecast }: { forecast: ForecastSnapshot }) {
   return (
-    <section className="forecast-output">
-      <div className="forecast-heading">
+    <section className="forecast-panel">
+      <header>
         <div>
-          <span className="section-label">Evidence-gated Phase 4 output</span>
-          <h3>Zone and time forecast</h3>
-          <p>Bounded operational intelligence only—no exact ATM, exact minute, or intent claim.</p>
+          <span className="mint section-label">BOUNDED OPERATIONAL FORECAST</span>
+          <h2>Prediction is released only where evidence passed.</h2>
         </div>
-        <div className="forecast-confidence">
-          <span>Confidence</span>
+        <div>
+          <span>CONFIDENCE</span>
           <strong>{Math.round(forecast.confidence * 100)}%</strong>
-          <small>graph v{forecast.graphVersion}</small>
+          <small>Graph v{forecast.graphVersion}</small>
         </div>
-      </div>
-
-      <div className="forecast-grid">
-        <article className="forecast-dimension">
-          <div className="forecast-dimension-heading">
-            <div>
-              <span className="section-label">Probable cash-out geography</span>
-              <h4>{forecast.geo.decision === 'PREDICT' ? 'Top zones' : 'Geo withheld'}</h4>
-            </div>
-            <span className={`forecast-decision ${forecast.geo.decision.toLowerCase()}`}>
-              {forecast.geo.decision}
-            </span>
-          </div>
+      </header>
+      <div className="forecast-columns">
+        <article>
+          <span>PROBABLE CASH-OUT ZONES</span>
           {forecast.geo.decision === 'PREDICT' ? (
-            <div className="forecast-ranking">
-              {forecast.geo.candidates.map((candidate, index) => (
-                <div className="forecast-row" key={candidate.zoneId}>
-                  <span>{String(index + 1).padStart(2, '0')}</span>
-                  <div>
-                    <strong>{candidate.label}</strong>
-                    <small>{candidate.reasonCodes.join(' / ').replaceAll('_', ' ')}</small>
-                    <span className="probability-track">
-                      <span style={{ width: `${candidate.probability * 100}%` }} />
-                    </span>
-                  </div>
-                  <strong>{Math.round(candidate.probability * 100)}%</strong>
-                </div>
-              ))}
-              <div className="forecast-other">
-                <span>All other observed zones</span>
-                <strong>{Math.round(forecast.geo.otherProbability * 100)}%</strong>
+            forecast.geo.candidates.map((candidate, index) => (
+              <div className="forecast-rank" key={candidate.zoneId}>
+                <b>{String(index + 1).padStart(2, '0')}</b>
+                <p>
+                  <strong>{candidate.label}</strong>
+                  <small>{candidate.reasonCodes.map(humanize).join(' · ')}</small>
+                  <i>
+                    <span style={{ width: `${candidate.probability * 100}%` }} />
+                  </i>
+                </p>
+                <em>{Math.round(candidate.probability * 100)}%</em>
               </div>
-            </div>
+            ))
           ) : (
-            <div className="forecast-abstention">
-              <strong>Location prediction intentionally withheld</strong>
-              <p>{forecast.geo.reasonCodes.join(' / ').replaceAll('_', ' ')}</p>
+            <div className="abstain-block">
+              <strong>Geo withheld</strong>
+              <p>{forecast.geo.reasonCodes.map(humanize).join(' · ')}</p>
             </div>
           )}
         </article>
-
-        <article className="forecast-dimension">
-          <div className="forecast-dimension-heading">
-            <div>
-              <span className="section-label">Bounded time-to-event</span>
-              <h4>
-                {forecast.time.decision === 'PREDICT'
-                  ? formatTimeBucket(forecast.time.highestRiskBucket)
-                  : 'Time withheld'}
-              </h4>
-            </div>
-            <span className={`forecast-decision ${forecast.time.decision.toLowerCase()}`}>
-              {forecast.time.decision}
-            </span>
-          </div>
+        <article>
+          <span>BOUNDED TIME HORIZONS</span>
           {forecast.time.decision === 'PREDICT' ? (
-            <div className="forecast-ranking">
-              {forecast.time.horizons.map((horizon, index) => (
-                <div className="forecast-row" key={horizon.bucket}>
-                  <span>{String(index + 1).padStart(2, '0')}</span>
-                  <div>
-                    <strong>{formatTimeBucket(horizon.bucket)}</strong>
-                    <small>{horizon.reasonCodes.join(' / ').replaceAll('_', ' ')}</small>
-                    <span className="probability-track">
-                      <span style={{ width: `${horizon.probability * 100}%` }} />
-                    </span>
-                  </div>
-                  <strong>{Math.round(horizon.probability * 100)}%</strong>
-                </div>
-              ))}
-            </div>
+            forecast.time.horizons.map((horizon, index) => (
+              <div className="forecast-rank" key={horizon.bucket}>
+                <b>{String(index + 1).padStart(2, '0')}</b>
+                <p>
+                  <strong>{humanize(horizon.bucket)}</strong>
+                  <small>{horizon.reasonCodes.map(humanize).join(' · ')}</small>
+                  <i>
+                    <span style={{ width: `${horizon.probability * 100}%` }} />
+                  </i>
+                </p>
+                <em>{Math.round(horizon.probability * 100)}%</em>
+              </div>
+            ))
           ) : (
-            <div className="forecast-abstention">
-              <strong>Time prediction intentionally withheld</strong>
-              <p>{forecast.time.reasonCodes.join(' / ').replaceAll('_', ' ')}</p>
+            <div className="abstain-block">
+              <strong>Time withheld</strong>
+              <p>{forecast.time.reasonCodes.map(humanize).join(' · ')}</p>
             </div>
           )}
         </article>
-      </div>
-
-      <div className="forecast-lineage">
-        <span>
-          {forecast.previousPredictionRunId
-            ? `Reforecast from ${forecast.previousPredictionRunId}`
-            : 'Initial forecast for this case'}
-        </span>
-        <span>{forecast.modelVersion}</span>
-        <span>{forecast.ruleVersion}</span>
       </div>
     </section>
   );
 }
 
-function PredictionWorkspace({ apiBase }: { apiBase: string }) {
+function EvidenceWorkspace({ apiBase }: { apiBase: string }) {
   const [caseId, setCaseId] = useState('case:complaint-golden-a');
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   const [exitMode, setExitMode] = useState<ExitModeSnapshot | null>(null);
-  const [exitModePending, setExitModePending] = useState(false);
-  const [evidenceGate, setEvidenceGate] = useState<EvidenceGateSnapshot | null>(null);
-  const [evidenceGatePending, setEvidenceGatePending] = useState(false);
+  const [gate, setGate] = useState<EvidenceGateSnapshot | null>(null);
   const [forecast, setForecast] = useState<ForecastSnapshot | null>(null);
-  const [forecastPending, setForecastPending] = useState(false);
-  const [loadState, setLoadState] = useState<LoadState>('idle');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [demoProgress, setDemoProgress] = useState('');
+  const [state, setState] = useState<LoadState>('idle');
+  const [message, setMessage] = useState('');
+  const bootstrapped = useRef(false);
 
-  const load = async (targetCaseId = caseId) => {
-    setLoadState('loading');
-    setErrorMessage('');
-    try {
-      const result = await loadPredictionReadiness(targetCaseId, apiBase);
-      setCaseDetail(result.caseDetail);
-      setExitMode(result.exitMode);
-      setExitModePending(result.exitModePending);
-      setEvidenceGate(result.evidenceGate);
-      setEvidenceGatePending(result.evidenceGatePending);
-      setForecast(result.forecast);
-      setForecastPending(result.forecastPending);
-      setLoadState('ready');
-    } catch (error) {
-      setCaseDetail(null);
-      setExitMode(null);
-      setEvidenceGate(null);
-      setForecast(null);
-      setExitModePending(false);
-      setEvidenceGatePending(false);
-      setForecastPending(false);
-      setLoadState('error');
-      setErrorMessage(
-        error instanceof ApiError
-          ? `${error.code}: ${error.message}`
-          : 'Prediction readiness could not be loaded.',
-      );
-    }
-  };
-
-  const runDemo = async (scenario: 'supported' | 'stationary') => {
-    setLoadState('loading');
-    setErrorMessage('');
+  const run = async (scenario: 'supported' | 'stationary') => {
+    setState('loading');
+    setMessage('');
     try {
       const runner = scenario === 'supported' ? runGoldenTraceDemo : runStationaryGateDemo;
-      const loadedCaseId = await runner(setDemoProgress, apiBase);
+      const loadedCaseId = await runner(setMessage, apiBase);
       setCaseId(loadedCaseId);
-      await load(loadedCaseId);
+      const result = await loadPredictionReadiness(loadedCaseId, apiBase);
+      setCaseDetail(result.caseDetail);
+      setExitMode(result.exitMode);
+      setGate(result.evidenceGate);
+      setForecast(result.forecast);
+      setState('ready');
     } catch (error) {
-      setLoadState('error');
-      setErrorMessage(
+      setState('error');
+      setMessage(
         error instanceof ApiError
           ? `${error.code}: ${error.message}`
-          : 'The deterministic prediction demo could not complete.',
+          : 'Evidence evaluation failed.',
       );
     }
   };
 
+  useEffect(() => {
+    if (!bootstrapped.current) {
+      bootstrapped.current = true;
+      void run('supported');
+    }
+  }, []);
+
   return (
-    <section className="case-workspace prediction-workspace">
-      <div className="case-toolbar">
+    <section className="evidence-workspace workspace-screen">
+      <div className="workspace-title-row">
         <div>
-          <span className="section-label">Evidence-gated forecasting</span>
-          <h2>Exit Mode and Operational Forecast</h2>
-          <p>
-            First rank stationary, forwarding, or likely cash-out. Geo and time unlock only when
-            their own evidence is sufficient.
-          </p>
+          <span className="case-kicker">EVIDENCE GATE / {caseId}</span>
+          <h1>Is the evidence strong enough to forecast?</h1>
         </div>
-        <div className="case-controls prediction-controls">
-          <label htmlFor="prediction-case-id">Case ID</label>
-          <div>
-            <input
-              id="prediction-case-id"
-              onChange={(event) => setCaseId(event.target.value)}
-              value={caseId}
-            />
-            <button disabled={loadState === 'loading'} onClick={() => void load()} type="button">
-              Load case
-            </button>
-          </div>
-          <div className="demo-actions">
-            <button
-              className="secondary-action"
-              disabled={loadState === 'loading'}
-              onClick={() => void runDemo('supported')}
-              type="button"
-            >
-              Run supported forecast
-            </button>
-            <button
-              className="secondary-action"
-              disabled={loadState === 'loading'}
-              onClick={() => void runDemo('stationary')}
-              type="button"
-            >
-              Run stationary abstention
-            </button>
-          </div>
+        <div className="scenario-switch">
+          <button onClick={() => void run('supported')} type="button">
+            SUPPORTED PATH
+          </button>
+          <button onClick={() => void run('stationary')} type="button">
+            ABSTAIN PATH
+          </button>
         </div>
       </div>
-
-      {loadState === 'loading' && (
-        <div className="intentional-state loading-state">
-          <span className="status-dot" />
-          <div>
-            <strong>Evaluating versioned evidence</strong>
-            <p>{demoProgress || 'Loading current exit-mode and Evidence Gate snapshots...'}</p>
-          </div>
-        </div>
+      {state === 'loading' && (
+        <LoadingState
+          detail={message || 'Ranking exit mode before geo and time…'}
+          title="Evaluating versioned evidence"
+        />
       )}
-
-      {loadState === 'error' && (
-        <div className="intentional-state error-state">
-          <strong>Prediction readiness unavailable</strong>
-          <p>{errorMessage}</p>
-        </div>
-      )}
-
-      {loadState === 'idle' && (
-        <div className="intentional-state empty-state">
-          <strong>No prediction evidence loaded</strong>
-          <p>Load a case, or run either deterministic evidence path.</p>
-        </div>
-      )}
-
-      {loadState === 'ready' && caseDetail && (
+      {state === 'error' && <ErrorState message={message} onRetry={() => void run('supported')} />}
+      {state === 'ready' && caseDetail && (
         <>
-          <div className="case-facts">
-            <article>
-              <span>Case state</span>
-              <strong>{caseDetail.summary.state.replaceAll('_', ' ')}</strong>
-            </article>
-            <article>
-              <span>Graph version</span>
-              <strong>v{caseDetail.summary.graphVersion}</strong>
-            </article>
-            <article>
-              <span>Exit-mode account</span>
-              <strong>{exitMode?.accountId ?? 'Pending'}</strong>
-            </article>
-            <article>
-              <span>Forecast output</span>
-              <strong>{forecast ? 'CURRENT' : (evidenceGate?.overallDecision ?? 'Pending')}</strong>
-            </article>
-          </div>
-
-          {exitModePending && (
-            <div className="intentional-state pending-state">
-              <strong>
-                Exit mode has not been assessed for graph v{caseDetail.summary.graphVersion}
-              </strong>
-              <p>Exposure and a current account-risk snapshot are required before this step.</p>
+          <section className="decision-strip">
+            <div>
+              <span>CASE STATE</span>
+              <strong>{humanize(caseDetail.summary.state)}</strong>
+            </div>
+            <div>
+              <span>EXIT MODE</span>
+              <strong>{exitMode ? humanize(exitMode.selectedMode) : 'Not assessed'}</strong>
+            </div>
+            <div>
+              <span>GATE DECISION</span>
+              <strong>{gate?.overallDecision ?? 'Not assessed'}</strong>
+            </div>
+            <div>
+              <span>FORECAST</span>
+              <strong>{forecast ? 'VERSION CURRENT' : 'WITHHELD'}</strong>
+            </div>
+          </section>
+          {gate && (
+            <div className="gate-grid">
+              <GateCard decision={gate.geo} dimension="Geo" />
+              <GateCard decision={gate.time} dimension="Time" />
             </div>
           )}
-
-          {exitMode && (
-            <article className="exit-mode-panel">
-              <div className="card-heading">
-                <div>
-                  <span className="section-label">First-stage classifier</span>
-                  <h3>{exitMode.selectedMode.replaceAll('_', ' ')}</h3>
-                </div>
-                <span className="version-badge">graph v{exitMode.graphVersion}</span>
-              </div>
-              <p className="panel-note">
-                This describes the evidence-supported movement mode. It does not infer intent.
-              </p>
-              <div className="mode-ranking">
-                {exitMode.rankedModes.map((candidate, index) => (
-                  <div
-                    className={index === 0 ? 'mode-candidate selected' : 'mode-candidate'}
-                    key={candidate.mode}
-                  >
-                    <span>{String(index + 1).padStart(2, '0')}</span>
-                    <div>
-                      <strong>{candidate.mode.replaceAll('_', ' ')}</strong>
-                      <small>{candidate.reasonCodes.join(' / ').replaceAll('_', ' ')}</small>
-                    </div>
-                    <strong>{Math.round(candidate.probability * 100)}%</strong>
-                  </div>
-                ))}
-              </div>
-            </article>
-          )}
-
-          {evidenceGatePending && !exitModePending && (
-            <div className="intentional-state pending-state">
-              <strong>Geo and time evidence have not been gated yet</strong>
-              <p>The workspace remains in monitoring mode until both dimensions are evaluated.</p>
+          {gate?.overallDecision === 'ABSTAIN' && (
+            <div className="abstention-banner">
+              <span>ABSTAIN IS AN OPERATIONAL DECISION</span>
+              <strong>Insufficient evidence; continue monitoring.</strong>
+              <p>No map, exact ATM, or forced time estimate will be shown.</p>
             </div>
           )}
-
-          {evidenceGate && exitMode && (
-            <>
-              <div className="gate-layout">
-                <GateCard decision={evidenceGate.geo} dimension="Geo" />
-                <GateCard decision={evidenceGate.time} dimension="Time" />
-              </div>
-              <div
-                className={`intentional-state forecast-boundary ${evidenceGate.overallDecision.toLowerCase()}`}
-              >
-                <strong>
-                  {exitMode.selectedMode === 'STATIONARY'
-                    ? 'Funds are stationary; monitoring and abstention are correct.'
-                    : evidenceGate.overallDecision === 'PREDICT'
-                      ? 'Both Evidence Gates passed.'
-                      : evidenceGate.overallDecision === 'PARTIAL'
-                        ? 'Only the supported forecast dimension may proceed.'
-                        : 'Evidence is insufficient; remain in monitoring mode.'}
-                </strong>
-                <p>
-                  {exitMode.selectedMode === 'STATIONARY'
-                    ? 'No geo or time forecast is forced from stationary funds.'
-                    : forecast
-                      ? 'Only bounded zone and time probabilities are emitted; exact endpoint claims remain prohibited.'
-                      : 'The Evidence Gate is ready; the current graph still needs a versioned forecast run.'}
-                </p>
-              </div>
-            </>
-          )}
-
-          {forecastPending && evidenceGate && (
-            <div className="intentional-state pending-state">
-              <strong>Forecast has not been ranked for this graph version</strong>
-              <p>The current Evidence Gate remains visible, but stale outputs are never reused.</p>
-            </div>
-          )}
-
           {forecast && <ForecastPanel forecast={forecast} />}
         </>
       )}
@@ -880,100 +801,249 @@ function PredictionWorkspace({ apiBase }: { apiBase: string }) {
   );
 }
 
-function CommandCenter({ manifest }: { manifest: SystemManifest | null }) {
-  return (
-    <>
-      <section className="intro-panel">
-        <div>
-          <span className="section-label">Current checkpoint</span>
-          <h2>Complaint-to-forecast intelligence is live.</h2>
-          <p>
-            Provider events are accepted through strict contracts, replayed safely, ordered by
-            financial time, converted into a versioned graph, and evaluated as ranges and
-            explainable multi-signal risk. Exit mode is ranked first; geo and time readiness are
-            evaluated independently, ranked into bounded zones and time horizons, and may
-            intentionally abstain.
-          </p>
-        </div>
-        <div className="phase-stamp">
-          <span>BUILD STATE</span>
-          <strong>{manifest?.phase.replaceAll('_', ' ') ?? 'PHASE 1 TRACE SLICE'}</strong>
-        </div>
-      </section>
+function VerifyWorkspace({ apiBase }: { apiBase: string }) {
+  const [amount, setAmount] = useState(5000);
+  const [receiver, setReceiver] = useState('acct:receiver-a');
+  const [state, setState] = useState<LoadState>('idle');
+  const [assessment, setAssessment] = useState<PaymentRiskAssessment | null>(null);
+  const [message, setMessage] = useState('');
 
-      <section className="foundation-grid" aria-label="Foundation capabilities">
-        {foundationItems.map(([label, value]) => (
-          <article key={label}>
-            <span>{label}</span>
-            <strong>{value}</strong>
+  const evaluate = async () => {
+    setState('loading');
+    setMessage('Evaluating bank/PSP signals…');
+    try {
+      setAssessment(
+        await evaluateDemoPaymentRisk(
+          { amountRupees: amount, receiverReference: receiver },
+          apiBase,
+        ),
+      );
+      setState('ready');
+    } catch (error) {
+      setState('error');
+      setMessage(
+        error instanceof ApiError ? `${error.code}: ${error.message}` : 'Risk evaluation failed.',
+      );
+    }
+  };
+
+  return (
+    <section className="verify-workspace workspace-screen">
+      <div className="workspace-title-row">
+        <div>
+          <span className="case-kicker">PREVENT / PRE-PAYMENT DECISION</span>
+          <h1>What should happen before this payment proceeds?</h1>
+        </div>
+      </div>
+      <div className="verify-layout">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void evaluate();
+          }}
+        >
+          <span className="mint section-label">PROVIDER-SUPPLIED PAYMENT CONTEXT</span>
+          <label>
+            Receiver reference
+            <input value={receiver} onChange={(event) => setReceiver(event.target.value)} />
+          </label>
+          <label>
+            Payment amount (₹)
+            <input
+              min="1"
+              onChange={(event) => setAmount(Number(event.target.value))}
+              type="number"
+              value={amount}
+            />
+          </label>
+          <button disabled={state === 'loading'} type="submit">
+            EVALUATE PAYMENT
+          </button>
+          <p>
+            TRISHUL evaluates observable transaction, receiver-behaviour and network signals. It
+            does not infer payer or receiver intent.
+          </p>
+        </form>
+        <article className="risk-decision-panel">
+          {state === 'idle' && (
+            <div className="decision-empty">
+              <span>NO DECISION YET</span>
+              <strong>Submit provider context to evaluate.</strong>
+            </div>
+          )}
+          {state === 'loading' && (
+            <LoadingState detail={message} title="Calculating explainable risk" />
+          )}
+          {state === 'error' && <ErrorState message={message} />}
+          {state === 'ready' && assessment && (
+            <>
+              <span>PAYMENT DECISION</span>
+              <h2>{assessment.decision}</h2>
+              <p>
+                {humanize(assessment.transactionAnomaly.band)} transaction anomaly ·{' '}
+                {humanize(assessment.receiverBehaviour.band)} receiver behaviour ·{' '}
+                {humanize(assessment.networkRisk.band)} network risk
+              </p>
+              <div className="risk-dimensions">
+                <div>
+                  <span>TRANSACTION</span>
+                  <strong>{assessment.transactionAnomaly.score}/100</strong>
+                </div>
+                <div>
+                  <span>RECEIVER</span>
+                  <strong>{assessment.receiverBehaviour.score}/100</strong>
+                </div>
+                <div>
+                  <span>NETWORK</span>
+                  <strong>{assessment.networkRisk.score}/100</strong>
+                </div>
+              </div>
+              <div className="reason-tags">
+                {assessment.reasonCodes.map((reason) => (
+                  <span key={reason}>{humanize(reason)}</span>
+                ))}
+              </div>
+            </>
+          )}
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function CommandCenter({
+  manifest,
+  onOpenTrace,
+}: {
+  manifest: SystemManifest | null;
+  onOpenTrace: () => void;
+}) {
+  const capabilities = [
+    ['01', 'PREVENT', 'Explainable allow, warn or step-up before payment'],
+    ['02', 'TRACE', 'Provider-confirmed money movement with a hard visibility boundary'],
+    ['03', 'PREDICT / ABSTAIN', 'Independent geo and time Evidence Gates'],
+    ['04', 'INTERVENE', 'Human-authorised action with reasons and audit lineage'],
+  ];
+  return (
+    <section className="command-workspace workspace-screen">
+      <div className="command-heading">
+        <span>TRISHUL / OPERATIONAL OVERVIEW</span>
+        <h1>One case. One evidence chain. No invented certainty.</h1>
+        <p>
+          The workspace carries a complaint from pre-payment risk through bounded tracing,
+          evidence-gated prediction, authorised intervention and outcome capture.
+        </p>
+        <button onClick={onOpenTrace} type="button">
+          OPEN ACTIVE CASE <b>→</b>
+        </button>
+      </div>
+      <div className="command-status">
+        <div>
+          <span>SYSTEM PHASE</span>
+          <strong>{manifest ? humanize(manifest.phase) : 'Loading manifest'}</strong>
+        </div>
+        <div>
+          <span>PERSISTENCE</span>
+          <strong>
+            {manifest?.persistenceMode ? humanize(manifest.persistenceMode) : 'Development adapter'}
+          </strong>
+        </div>
+        <div>
+          <span>CAPABILITIES</span>
+          <strong>{manifest?.capabilities.length ?? 0} validated</strong>
+        </div>
+      </div>
+      <div className="capability-list">
+        {capabilities.map(([index, title, detail]) => (
+          <article key={title}>
+            <span>{index}</span>
+            <strong>{title}</strong>
+            <p>{detail}</p>
           </article>
         ))}
-      </section>
+      </div>
+    </section>
+  );
+}
 
-      <section className="workspace-grid">
-        <article className="work-card next-slice">
-          <div className="card-heading">
-            <div>
-              <span className="section-label">Live vertical slice</span>
-              <h3>Complaint to operational forecast</h3>
-            </div>
-            <span className="priority">P0</span>
-          </div>
-          <ol>
-            <li>Complaint creates an idempotent reported case</li>
-            <li>Provider resolution anchors the beneficiary account</li>
-            <li>Financial events enter a conflict-safe chronological ledger</li>
-            <li>TRACE returns a versioned graph and explicit visibility boundary</li>
-            <li>Exposure and risk stay versioned, explainable, and provenance-backed</li>
-            <li>Exit mode precedes independent geo and time Evidence Gates</li>
-            <li>Top zones and bounded time horizons persist against the current graph version</li>
-          </ol>
+function BoundaryWorkspace({
+  mode,
+  manifest,
+}: {
+  mode: 'intervene' | 'audit';
+  manifest: SystemManifest | null;
+}) {
+  const intervention = mode === 'intervene';
+  return (
+    <section className="boundary-workspace workspace-screen">
+      <div className="workspace-title-row">
+        <div>
+          <span className="case-kicker">
+            {intervention ? 'AUTHORISED INTERVENTION' : 'AUDIT / OUTCOME'}
+          </span>
+          <h1>
+            {intervention
+              ? 'What action is justified by the current evidence?'
+              : 'Can every decision be reconstructed?'}
+          </h1>
+        </div>
+      </div>
+      <div className="boundary-grid">
+        <article>
+          <span>CONTROL STATE</span>
+          <strong>{intervention ? 'HUMAN AUTHORISATION REQUIRED' : 'APPEND-ONLY RECORDING'}</strong>
+          <p>
+            {intervention
+              ? 'TRISHUL recommends and packages evidence. A bank, PSP or authorised LEA operator remains responsible for the action.'
+              : 'Case actions, reasons, evidence anchors, model versions and institutional outcomes remain linked for later review.'}
+          </p>
         </article>
-
-        <article className="work-card guardrails">
-          <div className="card-heading">
-            <div>
-              <span className="section-label">Always enforced</span>
-              <h3>Decision guardrails</h3>
-            </div>
-          </div>
+        <article>
+          <span>AVAILABLE CONTRACTS</span>
           <dl>
             <div>
-              <dt>Intent</dt>
-              <dd>Never inferred</dd>
+              <dt>Trust access</dt>
+              <dd>
+                {manifest?.trustAccessMode
+                  ? humanize(manifest.trustAccessMode)
+                  : 'Capability scoped'}
+              </dd>
             </div>
             <div>
-              <dt>Complaint</dt>
-              <dd>Case anchor, not blacklist</dd>
+              <dt>Evidence integrity</dt>
+              <dd>SHA-256 receipt + replaceable anchor provider</dd>
             </div>
             <div>
-              <dt>Graph edge</dt>
-              <dd>Provider provenance required</dd>
+              <dt>Identity resolution</dt>
+              <dd>Two-person approval, reference-only response</dd>
             </div>
             <div>
-              <dt>Replay</dt>
-              <dd>Idempotent or rejected</dd>
-            </div>
-            <div>
-              <dt>Mule state</dt>
-              <dd>Confirmed only by trusted outcome</dd>
+              <dt>Autonomous freeze</dt>
+              <dd>Not permitted</dd>
             </div>
           </dl>
         </article>
-      </section>
-    </>
+      </div>
+      <div className="operational-boundary">
+        <span>WHY THIS SCREEN DOES NOT FAKE AN ACTION</span>
+        <p>
+          Recording a bank alert, LEA alert, identity-resolution decision or outcome requires a
+          valid scoped credential and evidence anchor. The public synthetic profile intentionally
+          exposes the boundary instead of bypassing it.
+        </p>
+      </div>
+    </section>
   );
 }
 
 export function App() {
   const [apiState, setApiState] = useState<ApiState>('checking');
   const [manifest, setManifest] = useState<SystemManifest | null>(null);
-  const [activeModule, setActiveModule] = useState(0);
+  const [active, setActive] = useState<WorkspaceKey>('trace');
   const apiBase = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
 
   useEffect(() => {
     const controller = new AbortController();
-
     fetch(`${apiBase}/system/manifest`, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error('API unavailable');
@@ -987,66 +1057,22 @@ export function App() {
         if (error instanceof DOMException && error.name === 'AbortError') return;
         setApiState('unavailable');
       });
-
     return () => controller.abort();
   }, [apiBase]);
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand-lockup">
-          <div className="brand-mark" aria-hidden="true">
-            T
-          </div>
-          <div>
-            <strong>TRISHUL</strong>
-            <span>Intelligence workspace</span>
-          </div>
-        </div>
-
-        <nav aria-label="Primary navigation">
-          {navigation.map((item, index) => (
-            <button
-              className={index === activeModule ? 'nav-item active' : 'nav-item'}
-              key={item}
-              onClick={() => setActiveModule(index)}
-              type="button"
-            >
-              <span>{String(index + 1).padStart(2, '0')}</span>
-              {item}
-            </button>
-          ))}
-        </nav>
-
-        <div className="doctrine-note">
-          <span>Operational doctrine</span>
-          <p>Evidence first. Prediction only when support is sufficient.</p>
-        </div>
-      </aside>
-
-      <main>
-        <header className="topbar">
-          <div>
-            <span className="eyebrow">SIH 2026 / PS26184</span>
-            <h1>{navigation[activeModule]}</h1>
-          </div>
-          <div className={`service-state ${apiState}`}>
-            <span className="status-dot" />
-            {apiState === 'checking' && 'Checking services'}
-            {apiState === 'ready' && 'API online'}
-            {apiState === 'unavailable' && 'API not running'}
-          </div>
-        </header>
-
-        {activeModule === 0 && <CommandCenter manifest={manifest} />}
-        {activeModule === 2 && <CaseIntelligence apiBase={apiBase} />}
-        {activeModule === 3 && <PredictionWorkspace apiBase={apiBase} />}
-        {activeModule !== 0 && activeModule !== 2 && activeModule !== 3 && (
-          <section className="intentional-state module-pending">
-            <strong>{navigation[activeModule]} is intentionally not mocked.</strong>
-            <p>This module will unlock when its backend contracts land in the assigned phase.</p>
-          </section>
+      <OperatorHeader apiState={apiState} onHome={() => setActive('command')} />
+      {active !== 'command' && <WorkflowRail active={active} onNavigate={setActive} />}
+      <main className={active === 'command' ? 'command-main' : ''}>
+        {active === 'command' && (
+          <CommandCenter manifest={manifest} onOpenTrace={() => setActive('trace')} />
         )}
+        {active === 'verify' && <VerifyWorkspace apiBase={apiBase} />}
+        {active === 'trace' && <TraceWorkspace apiBase={apiBase} />}
+        {active === 'evidence' && <EvidenceWorkspace apiBase={apiBase} />}
+        {active === 'intervene' && <BoundaryWorkspace manifest={manifest} mode="intervene" />}
+        {active === 'audit' && <BoundaryWorkspace manifest={manifest} mode="audit" />}
       </main>
     </div>
   );
