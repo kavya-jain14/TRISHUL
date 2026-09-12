@@ -1,7 +1,8 @@
-* @kavya-jain14
+* @kavya-jain14 @FuzailAhmad-Sphericaljudge
 
-/packages/contracts/ @kavya-jain14
-/packages/graph/ @kavya-jain14
-/packages/intelligence/ @kavya-jain14
-/packages/prediction/ @kavya-jain14
-/docs/ @kavya-jain14
+/apps/web/ @kavya-jain14 @FuzailAhmad-Sphericaljudge
+/apps/api/ @kavya-jain14 @FuzailAhmad-Sphericaljudge
+/apps/worker/ @kavya-jain14 @FuzailAhmad-Sphericaljudge
+/apps/psp-sandbox/ @kavya-jain14 @FuzailAhmad-Sphericaljudge
+/packages/ @kavya-jain14 @FuzailAhmad-Sphericaljudge
+/docs/ @kavya-jain14 @FuzailAhmad-Sphericaljudge

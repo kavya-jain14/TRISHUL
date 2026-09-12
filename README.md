@@ -92,4 +92,7 @@ See [docs/COMMAND_CENTER_BACKEND.md](docs/COMMAND_CENTER_BACKEND.md) for the ope
 
 ## Collaboration
 
-No direct feature work on `main`. Pull latest, create the assigned feature branch, run `npm run check`, then open a PR. Shared contracts must land before UI code depends on them. Full rules and ownership are in [docs/TEAM_WORKFLOW.md](docs/TEAM_WORKFLOW.md).
+Kavya and Fuzail jointly own product, UI/UX, backend and system architecture. No direct feature work
+on `main`: pull latest, create a scoped feature branch, run `npm run check`, then open a PR for the
+other owner. Shared contracts must land before UI code depends on them. Full rules and ownership
+are in [docs/TEAM_WORKFLOW.md](docs/TEAM_WORKFLOW.md).

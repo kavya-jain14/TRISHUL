@@ -6,6 +6,7 @@ import {
   ExposureSnapshotSchema,
   ForecastSnapshotSchema,
   GraphSnapshotSchema,
+  PaymentRiskRunResultSchema,
   type ExposureSnapshot,
   ProviderEventSchema,
   type CaseDetail,
@@ -14,6 +15,7 @@ import {
   type ForecastSnapshot,
   type GraphSnapshot,
   type MuleAssessmentSnapshot,
+  type PaymentRiskAssessment,
   type ProviderEvent,
 } from '@trishul/contracts';
 
@@ -98,6 +100,62 @@ export interface PredictionReadinessResult {
   evidenceGatePending: boolean;
   forecast: ForecastSnapshot | null;
   forecastPending: boolean;
+}
+
+export async function evaluateDemoPaymentRisk(
+  input: { amountRupees: number; receiverReference: string },
+  apiBase = '/api/v1',
+): Promise<PaymentRiskAssessment> {
+  const timestamp = new Date().toISOString();
+  const paymentReference = `payment:ui:${Date.now()}`;
+  const amountMinor = Math.max(100, Math.round(input.amountRupees * 100));
+  const provenance = {
+    sourceType: 'SIMULATOR' as const,
+    sourceName: 'TRISHUL Provider Simulator',
+    sourceEventId: `signal:${Date.now()}`,
+    observedAt: timestamp,
+    evidenceState: 'SIMULATED' as const,
+  };
+  const result = await requestJson(`${apiBase}/risk/evaluate`, {
+    method: 'POST',
+    idempotencyKey: `risk:${paymentReference}`,
+    body: JSON.stringify({
+      paymentReference,
+      payerReference: 'acct:kavya',
+      receiverReference: input.receiverReference,
+      amount: { amountMinor, currency: 'INR' },
+      occurredAt: timestamp,
+      payerSignals: {
+        priorSuccessfulPaymentsToReceiver: 0,
+        amountBaseline: {
+          medianMinor: 100_000,
+          medianAbsoluteDeviationMinor: 25_000,
+          sampleSize: 20,
+        },
+        transactionsLast10Minutes: 2,
+        baselineTransactionsPer10Minutes: 1,
+        usualActiveHoursUtc: { startHourUtc: 3, endHourUtc: 18 },
+        deviceStatus: 'KNOWN_TRUSTED',
+        provenance,
+      },
+      receiverSignals: {
+        trustStatus: 'VERIFIED',
+        inflowSpike: 0.68,
+        uniqueSenderSpike: 0.61,
+        passThroughRisk: 0.72,
+        behaviourShift: 0.66,
+        provenance,
+      },
+      networkSignals: {
+        reportedNetworkProximity: 0.42,
+        crossCaseLinkage: 0.58,
+        trustedExternalIntelligence: 0.2,
+        provenance,
+      },
+      stepUp: { status: 'NOT_PERFORMED' },
+    }),
+  });
+  return PaymentRiskRunResultSchema.parse(result).assessment;
 }
 
 export async function loadCaseIntelligence(
