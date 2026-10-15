@@ -17,6 +17,24 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe('Case Intelligence API client', () => {
+  it('preserves the HTTP status when an upstream error is not JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('<html>Unavailable</html>', { status: 502 })),
+    );
+    await expect(loadCaseIntelligence('case:test')).rejects.toMatchObject({
+      status: 502,
+      code: 'INVALID_RESPONSE',
+    });
+  });
+
+  it('handles a null error payload without throwing a property access error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(null, 503)));
+    await expect(loadCaseIntelligence('case:test')).rejects.toMatchObject({
+      status: 503,
+      code: 'REQUEST_FAILED',
+    });
+  });
   it('treats GRAPH_NOT_AVAILABLE as an intentional pending state', async () => {
     const fetchMock = vi
       .fn()
