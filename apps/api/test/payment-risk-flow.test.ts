@@ -115,6 +115,36 @@ describe('TRINETRA payment risk API', () => {
     expect((await submit('risk-service-token-abcdefghijklmnopqrstuvwxyz')).statusCode).toBe(201);
   });
 
+  it.each(['GET', 'POST'] as const)(
+    'rejects a multibyte service token with 401 on %s',
+    async (method) => {
+      const token = 'a'.repeat(40);
+      const invalidToken = 'é'.repeat(token.length);
+      const app = buildApp({
+        enforcePaymentRiskServiceToken: true,
+        paymentRiskServiceToken: token,
+      });
+      apps.push(app);
+
+      const response = await app.inject({
+        method,
+        url:
+          method === 'POST'
+            ? '/api/v1/risk/evaluate'
+            : '/api/v1/risk/evaluations/payment:protected/latest',
+        headers: {
+          'idempotency-key': 'risk:invalid-multibyte-token',
+          'x-trishul-service-token': invalidToken,
+        },
+        ...(method === 'POST' ? { payload: request } : {}),
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.json().error).toBe('PAYMENT_RISK_SERVICE_AUTH_REQUIRED');
+      expect(response.body).not.toContain(invalidToken);
+    },
+  );
+
   it('rejects client-invented fields and complaint-sourced behavioural signals', async () => {
     const app = buildApp();
     apps.push(app);

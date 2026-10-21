@@ -4,7 +4,7 @@
 
 `POST /api/v1/risk/evaluate` evaluates observable payer, receiver, transaction, and network signals before a payment. It never infers payer intent, declares fraud, or autonomously blocks national payment traffic.
 
-The endpoint is an internal bank/PSP/FI boundary. Production requires `TRISHUL_INTERNAL_SERVICE_TOKEN`; development may use labelled simulator provenance. Unknown fields and complaint-sourced behavioural signals are rejected.
+The endpoint is an internal bank/PSP/FI boundary. Production requires `TRISHUL_INTERNAL_SERVICE_TOKEN`; development may use labelled simulator provenance. Unknown fields and complaint-sourced behavioural signals are rejected. Invalid service tokens, including multibyte input, return the same `401` authentication response on write and read routes; token comparison checks UTF-8 byte lengths before the constant-time comparison.
 
 ## Decision model
 
