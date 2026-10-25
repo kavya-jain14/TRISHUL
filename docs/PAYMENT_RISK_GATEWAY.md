@@ -6,6 +6,8 @@
 
 The endpoint is an internal bank/PSP/FI boundary. Production requires `TRISHUL_INTERNAL_SERVICE_TOKEN`; development may use labelled simulator provenance. Unknown fields and complaint-sourced behavioural signals are rejected. Invalid service tokens, including multibyte input, return the same `401` authentication response on write and read routes; token comparison checks UTF-8 byte lengths before the constant-time comparison.
 
+The shared API request boundary rejects a body whose declared Content-Length differs from its received byte length with `400 INVALID_CONTENT_LENGTH`, before evaluating a payment or creating a complaint. The response contains a fixed message, not request content or parser diagnostics. Unexpected application errors still return a private `500` rather than trusting arbitrary client-status properties.
+
 ## Decision model
 
 - `ALLOW`: no material multi-signal risk, or a payer-only anomaly was cleared by provider-verified step-up.

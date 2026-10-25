@@ -8,6 +8,32 @@ afterEach(async () => {
 });
 
 describe('TRISHUL API foundation', () => {
+  it.each([1, 128])(
+    'rejects mismatched Content-Length %s with a private client error',
+    async (length) => {
+      const app = buildApp();
+      apps.push(app);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/complaints',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(length),
+          'idempotency-key': 'invalid-length-request',
+        },
+        payload: '{"private-complaint-marker":"test-only"}',
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({
+        error: 'INVALID_CONTENT_LENGTH',
+        message: 'The Content-Length header does not match the request body.',
+      });
+      expect(response.body).not.toContain('private-complaint-marker');
+    },
+  );
+
   it.each([
     {
       name: 'malformed JSON',

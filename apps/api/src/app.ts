@@ -182,6 +182,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   }));
 
   app.setErrorHandler((error, request, reply) => {
+    if (error instanceof errorCodes.FST_ERR_CTP_INVALID_CONTENT_LENGTH) {
+      return reply.status(400).send({
+        error: 'INVALID_CONTENT_LENGTH',
+        message: 'The Content-Length header does not match the request body.',
+      });
+    }
+
     if (
       error instanceof errorCodes.FST_ERR_CTP_INVALID_JSON_BODY ||
       error instanceof errorCodes.FST_ERR_CTP_EMPTY_JSON_BODY
