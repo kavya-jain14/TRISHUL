@@ -50,11 +50,12 @@ function idempotencyKey(request: FastifyRequest): string {
 function authorizeProvider(request: FastifyRequest, options: PaymentRiskRouteOptions): void {
   if (!options.enforceServiceToken) return;
   const supplied = request.headers['x-trishul-service-token'];
-  const expected = options.serviceToken ?? '';
+  const suppliedBytes = typeof supplied === 'string' ? Buffer.from(supplied, 'utf8') : null;
+  const expectedBytes = Buffer.from(options.serviceToken ?? '', 'utf8');
   if (
-    typeof supplied !== 'string' ||
-    supplied.length !== expected.length ||
-    !timingSafeEqual(Buffer.from(supplied, 'utf8'), Buffer.from(expected, 'utf8'))
+    suppliedBytes === null ||
+    suppliedBytes.length !== expectedBytes.length ||
+    !timingSafeEqual(suppliedBytes, expectedBytes)
   ) {
     throw new UnauthorizedError(
       'PAYMENT_RISK_SERVICE_AUTH_REQUIRED',

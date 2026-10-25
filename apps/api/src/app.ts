@@ -1,7 +1,7 @@
 import cors from '@fastify/cors';
 import { DevelopmentHashchainProvider } from '@trishul/audit';
 import { InMemoryTrustRepository, TrustAccessError, TrustAccessService } from '@trishul/trust';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { errorCodes, type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { DomainError } from './domain/errors.js';
 import {
@@ -182,6 +182,37 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   }));
 
   app.setErrorHandler((error, request, reply) => {
+    if (error instanceof errorCodes.FST_ERR_CTP_INVALID_CONTENT_LENGTH) {
+      return reply.status(400).send({
+        error: 'INVALID_CONTENT_LENGTH',
+        message: 'The Content-Length header does not match the request body.',
+      });
+    }
+
+    if (
+      error instanceof errorCodes.FST_ERR_CTP_INVALID_JSON_BODY ||
+      error instanceof errorCodes.FST_ERR_CTP_EMPTY_JSON_BODY
+    ) {
+      return reply.status(400).send({
+        error: 'INVALID_JSON_BODY',
+        message: 'The request body must contain valid JSON.',
+      });
+    }
+
+    if (error instanceof errorCodes.FST_ERR_CTP_BODY_TOO_LARGE) {
+      return reply.status(413).send({
+        error: 'PAYLOAD_TOO_LARGE',
+        message: 'The request body exceeds the allowed size.',
+      });
+    }
+
+    if (error instanceof errorCodes.FST_ERR_CTP_INVALID_MEDIA_TYPE) {
+      return reply.status(415).send({
+        error: 'UNSUPPORTED_MEDIA_TYPE',
+        message: 'The request content type is not supported.',
+      });
+    }
+
     if (error instanceof DomainError) {
       return reply.status(error.statusCode).send({
         error: error.code,

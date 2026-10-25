@@ -70,12 +70,23 @@ async function requestJson<T>(url: string, options: RequestOptions = {}): Promis
   if (options.idempotencyKey) headers.set('idempotency-key', options.idempotencyKey);
 
   const response = await fetch(url, { ...options, headers });
-  const payload = (await response.json()) as Record<string, unknown>;
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new ApiError(
+      response.status,
+      'INVALID_RESPONSE',
+      'The server returned an unreadable response. Please try again.',
+    );
+  }
+  const errorPayload =
+    typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {};
   if (!response.ok) {
     throw new ApiError(
       response.status,
-      typeof payload.error === 'string' ? payload.error : 'REQUEST_FAILED',
-      typeof payload.message === 'string' ? payload.message : 'The request failed.',
+      typeof errorPayload.error === 'string' ? errorPayload.error : 'REQUEST_FAILED',
+      typeof errorPayload.message === 'string' ? errorPayload.message : 'The request failed.',
     );
   }
   return payload as T;
